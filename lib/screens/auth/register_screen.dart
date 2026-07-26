@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:routesafe/services/api_service.dart';
 import 'package:routesafe/utils/app_colors.dart';
 import 'package:routesafe/widgets/custom_button.dart';
 import 'package:routesafe/widgets/custom_textfield.dart';
@@ -23,14 +24,55 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   bool hidePassword = true;
   bool hideConfirmPassword = true;
+  bool isLoading = false;
+
+  Future<void> submitRegistration() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => isLoading = true);
+
+    try {
+      final result = await ApiService.register(
+        fullName: fullNameController.text.trim(),
+        email: emailController.text.trim(),
+        phone: phoneController.text.trim(),
+        password: passwordController.text,
+        role: role,
+      );
+
+      if (!mounted) return;
+
+      final bool success = result["success"] == true;
+      final String message = result["message"] ?? "Something went wrong";
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: success ? AppColors.success : AppColors.danger,
+        ),
+      );
+
+      if (success) {
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Could not reach server: $e"),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text("Create Account"),
-      ),
+      appBar: AppBar(title: const Text("Create Account")),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Form(
@@ -38,33 +80,24 @@ class _RegisterScreenState extends State<RegisterScreen> {
           child: Column(
             children: [
               const SizedBox(height: 10),
-
               CustomTextField(
                 controller: fullNameController,
                 hintText: "Full Name",
                 icon: Icons.person_outline,
               ),
-
               const SizedBox(height: 15),
-
               CustomTextField(
                 controller: emailController,
                 hintText: "Email",
                 icon: Icons.email_outlined,
                 keyboardType: TextInputType.emailAddress,
                 validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return "Enter email";
-                  }
-                  if (!value.contains("@")) {
-                    return "Invalid email";
-                  }
+                  if (value == null || value.isEmpty) return "Enter email";
+                  if (!value.contains("@")) return "Invalid email";
                   return null;
                 },
               ),
-
               const SizedBox(height: 15),
-
               CustomTextField(
                 controller: phoneController,
                 hintText: "Phone Number",
@@ -77,9 +110,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   return null;
                 },
               ),
-
               const SizedBox(height: 15),
-
               DropdownButtonFormField<String>(
                 value: role,
                 decoration: const InputDecoration(
@@ -89,12 +120,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 items: const [
                   DropdownMenuItem(value: "Parent", child: Text("Parent")),
                   DropdownMenuItem(value: "Driver", child: Text("Driver")),
+                  DropdownMenuItem(value: "Admin", child: Text("Admin")),
                 ],
                 onChanged: (value) => setState(() => role = value!),
               ),
-
               const SizedBox(height: 15),
-
               CustomTextField(
                 controller: passwordController,
                 hintText: "Password",
@@ -107,8 +137,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         : Icons.visibility_outlined,
                     color: AppColors.textMuted,
                   ),
-                  onPressed: () =>
-                      setState(() => hidePassword = !hidePassword),
+                  onPressed: () => setState(() => hidePassword = !hidePassword),
                 ),
                 validator: (value) {
                   if (value == null || value.length < 6) {
@@ -117,9 +146,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   return null;
                 },
               ),
-
               const SizedBox(height: 15),
-
               CustomTextField(
                 controller: confirmPasswordController,
                 hintText: "Confirm Password",
@@ -143,25 +170,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   return null;
                 },
               ),
-
               const SizedBox(height: 28),
-
-              CustomButton(
-                text: "REGISTER",
-                onPressed: () {
-                  if (_formKey.currentState!.validate()) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text("Registration Successful"),
-                        backgroundColor: AppColors.success,
-                      ),
-                    );
-                  }
-                },
-              ),
-
+              isLoading
+                  ? const CircularProgressIndicator(color: AppColors.primary)
+                  : CustomButton(text: "REGISTER", onPressed: submitRegistration),
               const SizedBox(height: 16),
-
               TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: const Text("Already have an account? Login"),
