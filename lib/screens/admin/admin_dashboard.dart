@@ -1,10 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:routesafe/screens/admin/manage_buses_screen.dart';
 import 'package:routesafe/screens/auth/login_screen.dart';
 import 'package:routesafe/utils/app_colors.dart';
+import 'package:routesafe/utils/session_manager.dart';
 import 'package:routesafe/widgets/stat_card.dart';
 
 class AdminDashboard extends StatelessWidget {
-  const AdminDashboard({super.key});
+  final String userName;
+
+  const AdminDashboard({super.key, required this.userName});
+
+  Future<void> _logout(BuildContext context) async {
+    await SessionManager.clearSession();
+    if (!context.mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -13,34 +27,43 @@ class AdminDashboard extends StatelessWidget {
       appBar: AppBar(
         title: const Text("Admin Dashboard"),
         automaticallyImplyLeading: false,
+        actions: [
+          IconButton(
+            tooltip: "Logout",
+            icon: const Icon(Icons.logout),
+            onPressed: () => _logout(context),
+          ),
+        ],
       ),
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            const UserAccountsDrawerHeader(
-              decoration: BoxDecoration(
+            UserAccountsDrawerHeader(
+              decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [AppColors.primaryDark, AppColors.primary],
                 ),
               ),
-              accountName: Text("Administrator"),
-              accountEmail: Text("admin@routesafe.com"),
-              currentAccountPicture: CircleAvatar(
+              accountName: Text(userName),
+              accountEmail: const Text(""),
+              currentAccountPicture: const CircleAvatar(
                 backgroundColor: Colors.white,
-                child: Icon(
-                  Icons.admin_panel_settings,
-                  color: AppColors.primary,
-                  size: 40,
-                ),
+                child: Icon(Icons.admin_panel_settings, color: AppColors.primary, size: 40),
               ),
             ),
             ListTile(
               leading: const Icon(Icons.directions_bus, color: AppColors.primary),
               title: const Text("Manage Buses"),
-              onTap: () {},
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ManageBusesScreen()),
+                );
+              },
             ),
             ListTile(
               leading: const Icon(Icons.people, color: AppColors.primary),
@@ -66,13 +89,7 @@ class AdminDashboard extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.logout, color: AppColors.danger),
               title: const Text("Logout"),
-              onTap: () {
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
-                  (route) => false,
-                );
-              },
+              onTap: () => _logout(context),
             ),
           ],
         ),
@@ -84,11 +101,7 @@ class AdminDashboard extends StatelessWidget {
           children: [
             const Text(
               "Overview",
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
-              ),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
             ),
             const SizedBox(height: 4),
             const Text(
@@ -96,7 +109,6 @@ class AdminDashboard extends StatelessWidget {
               style: TextStyle(color: AppColors.textSecondary),
             ),
             const SizedBox(height: 18),
-
             GridView.count(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
@@ -108,51 +120,55 @@ class AdminDashboard extends StatelessWidget {
                 StatCard(
                   icon: Icons.directions_bus,
                   title: "Total Buses",
-                  value: "15",
+                  value: "—",
                   color: AppColors.primary,
                   backgroundColor: AppColors.primaryLight,
                 ),
                 StatCard(
                   icon: Icons.person,
                   title: "Drivers",
-                  value: "12",
-                  color: AppColors.accent,
-                  backgroundColor: AppColors.warningLight,
+                  value: "—",
+                  color: AppColors.skyBlue,
+                  backgroundColor: AppColors.primaryLight,
                 ),
                 StatCard(
                   icon: Icons.people,
                   title: "Parents",
-                  value: "180",
+                  value: "—",
                   color: AppColors.success,
                   backgroundColor: AppColors.successLight,
                 ),
                 StatCard(
                   icon: Icons.location_on,
                   title: "Running Trips",
-                  value: "6",
+                  value: "—",
                   color: AppColors.danger,
                   backgroundColor: AppColors.dangerLight,
                 ),
               ],
             ),
-
             const SizedBox(height: 26),
-
             const Text(
               "Quick Actions",
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
-              ),
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
             ),
             const SizedBox(height: 12),
-
+            InfoTile(
+              icon: Icons.directions_bus,
+              title: "Manage Buses",
+              subtitle: "Add, edit, or remove buses (CRUD)",
+              color: AppColors.primary,
+              backgroundColor: AppColors.primaryLight,
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ManageBusesScreen()),
+              ),
+            ),
             const InfoTile(
               icon: Icons.route,
               title: "Routes",
               subtitle: "Assign buses & drivers to routes",
-              color: AppColors.primary,
+              color: AppColors.skyBlue,
               backgroundColor: AppColors.primaryLight,
             ),
             const InfoTile(
