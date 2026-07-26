@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 9+ blocks plain HTTP (cleartext) traffic by default.
+  Your Flask backend runs on http:// (not https://), so without this file
+  every network call from the app (login, register, tracking, etc.) will
+  silently fail on a real device/emulator even though the UI loads fine.
+  This allows cleartext ONLY for local development hosts.
+  Remove this file (and the manifest reference to it) once your backend
+  is deployed behind HTTPS for production.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>
