@@ -36,7 +36,8 @@ class _ManageBusesScreenState extends State<ManageBusesScreen> {
         setState(() => errorMessage = result["message"] ?? "Failed to load buses");
       }
     } catch (e) {
-      setState(() => errorMessage = "Could not reach server: $e");
+      final message = e.toString().replaceFirst('Exception: ', '');
+      setState(() => errorMessage = message.isNotEmpty ? message : "Unable to load buses right now.");
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
@@ -98,7 +99,7 @@ class _ManageBusesScreenState extends State<ManageBusesScreen> {
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: status,
+                        initialValue: status,
                         decoration: const InputDecoration(labelText: "Status"),
                         items: const [
                           DropdownMenuItem(value: "Active", child: Text("Active")),
@@ -144,7 +145,9 @@ class _ManageBusesScreenState extends State<ManageBusesScreen> {
                     }
 
                     if (!dialogContext.mounted) return;
-                    Navigator.pop(dialogContext);
+                    if (result["success"] == true) {
+                      Navigator.pop(dialogContext);
+                    }
 
                     if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(

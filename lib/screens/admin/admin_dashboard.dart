@@ -1,14 +1,59 @@
 import 'package:flutter/material.dart';
 import 'package:routesafe/screens/admin/manage_buses_screen.dart';
 import 'package:routesafe/screens/auth/login_screen.dart';
+import 'package:routesafe/services/api_service.dart';
 import 'package:routesafe/utils/app_colors.dart';
 import 'package:routesafe/utils/session_manager.dart';
 import 'package:routesafe/widgets/stat_card.dart';
 
-class AdminDashboard extends StatelessWidget {
+class AdminDashboard extends StatefulWidget {
   final String userName;
 
   const AdminDashboard({super.key, required this.userName});
+
+  @override
+  State<AdminDashboard> createState() => _AdminDashboardState();
+}
+
+class _AdminDashboardState extends State<AdminDashboard> {
+  int? totalBuses;
+  int? totalDrivers;
+  int? totalParents;
+  bool loadingStats = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStats();
+  }
+
+  Future<void> _loadStats() async {
+    try {
+      final busesResult = await ApiService.getBuses();
+      final driversResult = await ApiService.getDriversCount();
+      final parentsResult = await ApiService.getParentsCount();
+
+      final buses = busesResult["buses"] as List<dynamic>?;
+      final drivers = driversResult["count"] as int?;
+      final parents = parentsResult["count"] as int?;
+
+      if (!mounted) return;
+      setState(() {
+        totalBuses = buses?.length ?? 0;
+        totalDrivers = drivers ?? 0;
+        totalParents = parents ?? 0;
+        loadingStats = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        totalBuses = 0;
+        totalDrivers = 0;
+        totalParents = 0;
+        loadingStats = false;
+      });
+    }
+  }
 
   Future<void> _logout(BuildContext context) async {
     await SessionManager.clearSession();
@@ -47,7 +92,7 @@ class AdminDashboard extends StatelessWidget {
                   colors: [AppColors.primaryDark, AppColors.primary],
                 ),
               ),
-              accountName: Text(userName),
+              accountName: Text(widget.userName),
               accountEmail: const Text(""),
               currentAccountPicture: const CircleAvatar(
                 backgroundColor: Colors.white,
@@ -57,12 +102,13 @@ class AdminDashboard extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.directions_bus, color: AppColors.primary),
               title: const Text("Manage Buses"),
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
-                Navigator.push(
+                await Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const ManageBusesScreen()),
                 );
+                _loadStats(); // refresh count after returning from Manage Buses
               },
             ),
             ListTile(
@@ -116,29 +162,29 @@ class AdminDashboard extends StatelessWidget {
               crossAxisSpacing: 14,
               mainAxisSpacing: 14,
               childAspectRatio: 1.15,
-              children: const [
+              children: [
                 StatCard(
                   icon: Icons.directions_bus,
                   title: "Total Buses",
-                  value: "—",
+                  value: loadingStats ? "…" : "${totalBuses ?? 0}",
                   color: AppColors.primary,
                   backgroundColor: AppColors.primaryLight,
                 ),
                 StatCard(
                   icon: Icons.person,
                   title: "Drivers",
-                  value: "—",
+                  value: loadingStats ? "…" : "${totalDrivers ?? 0}",
                   color: AppColors.skyBlue,
                   backgroundColor: AppColors.primaryLight,
                 ),
                 StatCard(
                   icon: Icons.people,
                   title: "Parents",
-                  value: "—",
+                  value: loadingStats ? "…" : "${totalParents ?? 0}",
                   color: AppColors.success,
                   backgroundColor: AppColors.successLight,
                 ),
-                StatCard(
+                const StatCard(
                   icon: Icons.location_on,
                   title: "Running Trips",
                   value: "—",
@@ -156,13 +202,16 @@ class AdminDashboard extends StatelessWidget {
             InfoTile(
               icon: Icons.directions_bus,
               title: "Manage Buses",
-              subtitle: "Add, edit, or remove buses (CRUD)",
+              subtitle: "Add, edit, or remove buses",
               color: AppColors.primary,
               backgroundColor: AppColors.primaryLight,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ManageBusesScreen()),
-              ),
+              onTap: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ManageBusesScreen()),
+                );
+                _loadStats();
+              },
             ),
             const InfoTile(
               icon: Icons.route,

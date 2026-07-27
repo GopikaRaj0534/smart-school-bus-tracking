@@ -1,30 +1,26 @@
 import 'package:flutter/material.dart';
 
-/// Central color palette for RouteSafe.
-///
-/// Brand: deep blue (trust, safety) with a warm amber accent (school-bus
-/// yellow) and clear status colors for trip states.
+/// Clean blue + white palette for RouteSafe.
 class AppColors {
-  // Brand
-  static const Color primary = Color(0xFF1E4FD8); // main brand blue
-  static const Color primaryDark = Color(0xFF15369E); // headers / gradients
-  static const Color primaryLight = Color(0xFFE8EEFE); // tints, chips, icons
+  static const Color primary = Color(0xFF1959D8);
+  static const Color primaryDark = Color(0xFF0E3B99);
+  static const Color primaryLight = Color(0xFFE7EFFD);
+  static const Color skyBlue = Color(0xFF4FA3F7);
 
-  static const Color accent = Color(0xFFFFB020); // school-bus amber
+  static const Color accent = Color(0xFF4FA3F7); // alias of skyBlue, used for secondary highlights
+  static const Color accentLight = Color(0xFFE9F4FE);
 
-  // Status
-  static const Color success = Color(0xFF19A974); // on-time / active / safe
-  static const Color successLight = Color(0xFFE3F7EE);
-  static const Color warning = Color(0xFFF59E0B); // delayed
-  static const Color warningLight = Color(0xFFFEF3E2);
-  static const Color danger = Color(0xFFE5484D); // emergency / stop
-  static const Color dangerLight = Color(0xFFFCEAEA);
+  static const Color success = Color(0xFF1CA96B);
+  static const Color successLight = Color(0xFFE2F6EC);
+  static const Color warning = Color(0xFFE0A100);
+  static const Color warningLight = Color(0xFFFCF1D6);
+  static const Color danger = Color(0xFFE0433F);
+  static const Color dangerLight = Color(0xFFFBE6E5);
 
-  // Neutrals
-  static const Color background = Color(0xFFF4F6FB);
+  static const Color background = Color(0xFFF6F8FC);
   static const Color surface = Colors.white;
-  static const Color border = Color(0xFFE3E8F1);
-  static const Color textPrimary = Color(0xFF101828);
-  static const Color textSecondary = Color(0xFF667085);
-  static const Color textMuted = Color(0xFF98A2B3);
+  static const Color border = Color(0xFFE1E7F2);
+  static const Color textPrimary = Color(0xFF0F1B33);
+  static const Color textSecondary = Color(0xFF5B6B85);
+  static const Color textMuted = Color(0xFF9AA6BA);
 }

@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:routesafe/screens/auth/login_screen.dart';
 import 'package:routesafe/utils/app_colors.dart';
+import 'package:routesafe/utils/session_manager.dart';
 import 'package:routesafe/widgets/custom_button.dart';
 import 'package:routesafe/widgets/stat_card.dart';
+import 'package:routesafe/widgets/tracking_map_card.dart';
 
 class DriverDashboard extends StatefulWidget {
-  const DriverDashboard({super.key});
+  final String userName;
+
+  const DriverDashboard({super.key, required this.userName});
 
   @override
   State<DriverDashboard> createState() => _DriverDashboardState();
@@ -14,6 +18,16 @@ class DriverDashboard extends StatefulWidget {
 class _DriverDashboardState extends State<DriverDashboard> {
   bool tripActive = false;
 
+  Future<void> _logout() async {
+    await SessionManager.clearSession();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -21,13 +35,16 @@ class _DriverDashboardState extends State<DriverDashboard> {
       appBar: AppBar(
         title: const Text("Driver Dashboard"),
         automaticallyImplyLeading: false,
+        actions: [
+          IconButton(tooltip: "Logout", icon: const Icon(Icons.logout), onPressed: _logout),
+        ],
       ),
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            const DrawerHeader(
-              decoration: BoxDecoration(
+            DrawerHeader(
+              decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -37,12 +54,9 @@ class _DriverDashboardState extends State<DriverDashboard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.drive_eta, size: 56, color: Colors.white),
-                  SizedBox(height: 10),
-                  Text(
-                    "Welcome Driver",
-                    style: TextStyle(color: Colors.white, fontSize: 20),
-                  ),
+                  const Icon(Icons.drive_eta, size: 56, color: Colors.white),
+                  const SizedBox(height: 10),
+                  Text(widget.userName, style: const TextStyle(color: Colors.white, fontSize: 20)),
                 ],
               ),
             ),
@@ -70,13 +84,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
             ListTile(
               leading: const Icon(Icons.logout, color: AppColors.danger),
               title: const Text("Logout"),
-              onTap: () {
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginScreen()),
-                  (route) => false,
-                );
-              },
+              onTap: _logout,
             ),
           ],
         ),
@@ -86,14 +94,11 @@ class _DriverDashboardState extends State<DriverDashboard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Trip status banner
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: tripActive
-                    ? AppColors.successLight
-                    : AppColors.primaryLight,
+                color: tripActive ? AppColors.successLight : AppColors.primaryLight,
                 borderRadius: BorderRadius.circular(18),
               ),
               child: Row(
@@ -110,20 +115,11 @@ class _DriverDashboardState extends State<DriverDashboard> {
                       children: [
                         Text(
                           tripActive ? "Trip In Progress" : "Trip Not Started",
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                            color: AppColors.textPrimary,
-                          ),
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: AppColors.textPrimary),
                         ),
                         Text(
-                          tripActive
-                              ? "Location sharing is active"
-                              : "Tap Start Trip when you're ready to go",
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: AppColors.textSecondary,
-                          ),
+                          tripActive ? "Location sharing is active" : "Tap Start Trip when you're ready to go",
+                          style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
                         ),
                       ],
                     ),
@@ -131,9 +127,12 @@ class _DriverDashboardState extends State<DriverDashboard> {
                 ],
               ),
             ),
-
             const SizedBox(height: 20),
-
+            const TrackingMapCard(
+              busNumber: "Bus KL 07 AB 1234",
+              routeLabel: "School → City Center",
+            ),
+            const SizedBox(height: 20),
             const InfoTile(
               icon: Icons.directions_bus,
               title: "Assigned Bus",
@@ -143,30 +142,24 @@ class _DriverDashboardState extends State<DriverDashboard> {
               icon: Icons.route,
               title: "Assigned Route",
               subtitle: "School → City Center",
-              color: AppColors.accent,
-              backgroundColor: AppColors.warningLight,
+              color: AppColors.skyBlue,
+              backgroundColor: AppColors.primaryLight,
             ),
-
             const SizedBox(height: 10),
-
             CustomButton(
               text: "START TRIP",
               icon: Icons.play_arrow,
               backgroundColor: AppColors.success,
               onPressed: () => setState(() => tripActive = true),
             ),
-
             const SizedBox(height: 14),
-
             CustomButton(
               text: "END TRIP",
               icon: Icons.stop,
               backgroundColor: AppColors.danger,
               onPressed: () => setState(() => tripActive = false),
             ),
-
             const SizedBox(height: 14),
-
             CustomButton(
               text: "REPORT EMERGENCY",
               icon: Icons.warning_amber_rounded,
