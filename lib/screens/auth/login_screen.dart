@@ -172,13 +172,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   children: [
                     Container(
                       padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(color: Colors.white.withOpacity(0.14), shape: BoxShape.circle),
+                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), shape: BoxShape.circle),
                       child: const Icon(Icons.directions_bus_filled_rounded, color: Colors.white, size: 46),
                     ),
                     const SizedBox(height: 14),
                     const Text("RouteSafe", style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: Colors.white)),
                     const SizedBox(height: 4),
-                    Text("Smart School Bus Tracking System", style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 14)),
+                    Text("Smart School Bus Tracking System", style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 14)),
                   ],
                 ),
               ),
@@ -191,7 +191,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(22),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, 8))],
+                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 20, offset: const Offset(0, 8))],
                     ),
                     child: Form(
                       key: _formKey,

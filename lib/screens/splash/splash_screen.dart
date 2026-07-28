@@ -69,7 +69,7 @@ class _SplashScreenState extends State<SplashScreen>
                 height: 180,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.white.withOpacity(0.08),
+                  color: Colors.white.withValues(alpha: 0.08),
                 ),
               ),
             ),
@@ -82,7 +82,7 @@ class _SplashScreenState extends State<SplashScreen>
                 height: 130,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.white.withOpacity(0.07),
+                  color: Colors.white.withValues(alpha: 0.07),
                 ),
               ),
             ),
@@ -101,7 +101,7 @@ class _SplashScreenState extends State<SplashScreen>
                         width: 92,
                         height: 92,
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.16),
+                          color: Colors.white.withValues(alpha: 0.16),
                           borderRadius: BorderRadius.circular(24),
                         ),
                         child: const Icon(
@@ -143,7 +143,7 @@ class _SplashScreenState extends State<SplashScreen>
                       Text(
                         "SAFE.  SMART.  CONNECTED.",
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.85),
+                          color: Colors.white.withValues(alpha: 0.85),
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 2,

@@ -19,7 +19,7 @@ class TrackingMapCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 16, offset: const Offset(0, 6))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 16, offset: const Offset(0, 6))],
       ),
       child: Column(
         children: [
@@ -117,7 +117,7 @@ class _PointLabel extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 4)],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 4)],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -138,7 +138,7 @@ class _MapPainter extends CustomPainter {
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
 
     final gridPaint = Paint()
-      ..color = AppColors.primary.withOpacity(0.06)
+      ..color = AppColors.primary.withValues(alpha: 0.06)
       ..strokeWidth = 1;
 
     const gridGap = 28.0;
@@ -158,7 +158,7 @@ class _MapPainter extends CustomPainter {
       ..quadraticBezierTo(control.dx, control.dy, end.dx, end.dy);
 
     final routePaint = Paint()
-      ..color = AppColors.primary.withOpacity(0.35)
+      ..color = AppColors.primary.withValues(alpha: 0.35)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 4
       ..strokeCap = StrokeCap.round;
