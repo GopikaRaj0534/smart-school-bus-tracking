@@ -31,36 +31,79 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _loadStats();
   }
 
+  // =========================
+  // LOAD DASHBOARD STATISTICS
+  // =========================
   Future<void> _loadStats() async {
-    try {
-      final busesResult = await ApiService.getBuses();
-      final driversResult = await ApiService.getDriversCount();
-      final parentsResult = await ApiService.getParentsCount();
-
-      final buses = busesResult['buses'] as List<dynamic>?;
-      final drivers = driversResult['count'] as int?;
-      final parents = parentsResult['count'] as int?;
-
-      if (!mounted) return;
-
+    if (mounted) {
       setState(() {
-        totalBuses = buses?.length ?? 0;
-        totalDrivers = drivers ?? 0;
-        totalParents = parents ?? 0;
-        loadingStats = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        totalBuses = 0;
-        totalDrivers = 0;
-        totalParents = 0;
-        loadingStats = false;
+        loadingStats = true;
       });
     }
+
+    // =========================
+    // LOAD BUSES
+    // =========================
+    try {
+      final busesResult = await ApiService.getBuses();
+
+      debugPrint('Buses API response: $busesResult');
+
+      if (busesResult['success'] == true) {
+        final busList = busesResult['buses'];
+
+        if (busList is List) {
+          totalBuses = busList.length;
+        } else {
+          totalBuses = 0;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading buses: $e');
+    }
+
+    // =========================
+    // LOAD DRIVERS
+    // =========================
+    try {
+      final driversResult = await ApiService.getDriversCount();
+
+      debugPrint('Drivers API response: $driversResult');
+
+      if (driversResult['success'] == true) {
+        totalDrivers =
+            int.tryParse(driversResult['count'].toString()) ?? 0;
+      }
+    } catch (e) {
+      debugPrint('Error loading drivers: $e');
+    }
+
+    // =========================
+    // LOAD PARENTS
+    // =========================
+    try {
+      final parentsResult = await ApiService.getParentsCount();
+
+      debugPrint('Parents API response: $parentsResult');
+
+      if (parentsResult['success'] == true) {
+        totalParents =
+            int.tryParse(parentsResult['count'].toString()) ?? 0;
+      }
+    } catch (e) {
+      debugPrint('Error loading parents: $e');
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      loadingStats = false;
+    });
   }
 
+  // =========================
+  // LOGOUT
+  // =========================
   Future<void> _logout(BuildContext context) async {
     await SessionManager.clearSession();
 
@@ -75,6 +118,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  // =========================
+  // OPEN MANAGE BUSES
+  // =========================
   Future<void> _openManageBuses() async {
     await Navigator.push(
       context,
@@ -83,7 +129,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
     );
 
-    _loadStats();
+    // Reload dashboard statistics
+    await _loadStats();
   }
 
   @override
@@ -136,6 +183,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
             ),
 
+            // =========================
+            // MANAGE BUSES
+            // =========================
             ListTile(
               leading: const Icon(
                 Icons.directions_bus,
@@ -148,6 +198,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               },
             ),
 
+            // =========================
+            // MANAGE DRIVERS
+            // =========================
             ListTile(
               leading: const Icon(
                 Icons.people,
@@ -157,6 +210,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               onTap: () {},
             ),
 
+            // =========================
+            // MANAGE PARENTS
+            // =========================
             ListTile(
               leading: const Icon(
                 Icons.family_restroom,
@@ -166,6 +222,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               onTap: () {},
             ),
 
+            // =========================
+            // MANAGE ROUTES
+            // =========================
             ListTile(
               leading: const Icon(
                 Icons.route,
@@ -175,6 +234,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               onTap: () {},
             ),
 
+            // =========================
+            // REPORTS
+            // =========================
             ListTile(
               leading: const Icon(
                 Icons.bar_chart,
@@ -186,6 +248,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
             const Divider(),
 
+            // =========================
+            // LOGOUT
+            // =========================
             ListTile(
               leading: const Icon(
                 Icons.logout,
@@ -201,117 +266,131 @@ class _AdminDashboardState extends State<AdminDashboard> {
       // =========================
       // DASHBOARD BODY
       // =========================
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Overview',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
+      body: RefreshIndicator(
+        onRefresh: _loadStats,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // =========================
+              // OVERVIEW
+              // =========================
+              const Text(
+                'Overview',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
               ),
-            ),
 
-            const SizedBox(height: 4),
+              const SizedBox(height: 4),
 
-            const Text(
-              'Live snapshot of your fleet',
-              style: TextStyle(
-                color: AppColors.textSecondary,
+              const Text(
+                'Live snapshot of your fleet',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                ),
               ),
-            ),
 
-            const SizedBox(height: 18),
+              const SizedBox(height: 18),
 
-            // =========================
-            // STATISTICS
-            // =========================
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              crossAxisSpacing: 14,
-              mainAxisSpacing: 14,
-              childAspectRatio: 1.15,
-              children: [
-                StatCard(
-                  icon: Icons.directions_bus,
-                  title: 'Total Buses',
-                  value: loadingStats ? '...' : '$totalBuses',
-                  color: AppColors.primary,
-                  backgroundColor: AppColors.primaryLight,
-                ),
+              // =========================
+              // STATISTICS
+              // =========================
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: 2,
+                crossAxisSpacing: 14,
+                mainAxisSpacing: 14,
+                childAspectRatio: 1.15,
+                children: [
+                  // TOTAL BUSES
+                  StatCard(
+                    icon: Icons.directions_bus,
+                    title: 'Total Buses',
+                    value: loadingStats ? '...' : '$totalBuses',
+                    color: AppColors.primary,
+                    backgroundColor: AppColors.primaryLight,
+                  ),
 
-                StatCard(
-                  icon: Icons.person,
-                  title: 'Drivers',
-                  value: loadingStats ? '...' : '$totalDrivers',
-                  color: AppColors.skyBlue,
-                  backgroundColor: AppColors.primaryLight,
-                ),
+                  // TOTAL DRIVERS
+                  StatCard(
+                    icon: Icons.person,
+                    title: 'Drivers',
+                    value: loadingStats ? '...' : '$totalDrivers',
+                    color: AppColors.skyBlue,
+                    backgroundColor: AppColors.primaryLight,
+                  ),
 
-                StatCard(
-                  icon: Icons.people,
-                  title: 'Parents',
-                  value: loadingStats ? '...' : '$totalParents',
-                  color: AppColors.success,
-                  backgroundColor: AppColors.successLight,
-                ),
+                  // TOTAL PARENTS
+                  StatCard(
+                    icon: Icons.people,
+                    title: 'Parents',
+                    value: loadingStats ? '...' : '$totalParents',
+                    color: AppColors.success,
+                    backgroundColor: AppColors.successLight,
+                  ),
 
-                const StatCard(
-                  icon: Icons.location_on,
-                  title: 'Running Trips',
-                  value: '0',
-                  color: AppColors.danger,
-                  backgroundColor: AppColors.dangerLight,
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 26),
-
-            // =========================
-            // QUICK ACTIONS
-            // =========================
-            const Text(
-              'Quick Actions',
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
+                  // RUNNING TRIPS
+                  const StatCard(
+                    icon: Icons.location_on,
+                    title: 'Running Trips',
+                    value: '0',
+                    color: AppColors.danger,
+                    backgroundColor: AppColors.dangerLight,
+                  ),
+                ],
               ),
-            ),
 
-            const SizedBox(height: 12),
+              const SizedBox(height: 26),
 
-            InfoTile(
-              icon: Icons.directions_bus,
-              title: 'Manage Buses',
-              subtitle: 'Add, edit, or remove buses',
-              color: AppColors.primary,
-              backgroundColor: AppColors.primaryLight,
-              onTap: _openManageBuses,
-            ),
+              // =========================
+              // QUICK ACTIONS
+              // =========================
+              const Text(
+                'Quick Actions',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
 
-            const InfoTile(
-              icon: Icons.route,
-              title: 'Routes',
-              subtitle: 'Assign buses & drivers to routes',
-              color: AppColors.skyBlue,
-              backgroundColor: AppColors.primaryLight,
-            ),
+              const SizedBox(height: 12),
 
-            const InfoTile(
-              icon: Icons.bar_chart,
-              title: 'Reports',
-              subtitle: 'View trip history & analytics',
-              color: AppColors.success,
-              backgroundColor: AppColors.successLight,
-            ),
-          ],
+              // MANAGE BUSES
+              InfoTile(
+                icon: Icons.directions_bus,
+                title: 'Manage Buses',
+                subtitle: 'Add, edit, or remove buses',
+                color: AppColors.primary,
+                backgroundColor: AppColors.primaryLight,
+                onTap: _openManageBuses,
+              ),
+
+              // ROUTES
+              const InfoTile(
+                icon: Icons.route,
+                title: 'Routes',
+                subtitle: 'Assign buses & drivers to routes',
+                color: AppColors.skyBlue,
+                backgroundColor: AppColors.primaryLight,
+              ),
+
+              // REPORTS
+              const InfoTile(
+                icon: Icons.bar_chart,
+                title: 'Reports',
+                subtitle: 'View trip history & analytics',
+                color: AppColors.success,
+                backgroundColor: AppColors.successLight,
+              ),
+            ],
+          ),
         ),
       ),
     );
