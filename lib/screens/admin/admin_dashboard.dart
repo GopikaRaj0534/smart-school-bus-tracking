@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
+
 import 'package:routesafe/screens/admin/manage_buses_screen.dart';
+import 'package:routesafe/screens/admin/manage_drivers_screen.dart';
+import 'package:routesafe/screens/admin/manage_parents_screen.dart';
+import 'package:routesafe/screens/admin/pending_parent_requests_screen.dart';
+import 'package:routesafe/screens/admin/parent_child_assignment_screen.dart';
 import 'package:routesafe/screens/auth/login_screen.dart';
 import 'package:routesafe/services/api_service.dart';
 import 'package:routesafe/utils/app_colors.dart';
@@ -19,9 +24,10 @@ class AdminDashboard extends StatefulWidget {
 }
 
 class _AdminDashboardState extends State<AdminDashboard> {
-  int totalBuses = 0;
-  int totalDrivers = 0;
-  int totalParents = 0;
+  int? totalBuses;
+  int? totalDrivers;
+  int? totalParents;
+  int? pendingRequestsCount;
 
   bool loadingStats = true;
 
@@ -31,9 +37,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _loadStats();
   }
 
-  // =========================
+  // ============================================================
   // LOAD DASHBOARD STATISTICS
-  // =========================
+  // ============================================================
+
   Future<void> _loadStats() async {
     if (mounted) {
       setState(() {
@@ -41,69 +48,70 @@ class _AdminDashboardState extends State<AdminDashboard> {
       });
     }
 
-    // =========================
-    // LOAD BUSES
-    // =========================
+    int busCount = 0;
+    int driverCount = 0;
+    int parentCount = 0;
+    int pendingCount = 0;
+
     try {
       final busesResult = await ApiService.getBuses();
+      final buses = busesResult['buses'] as List<dynamic>?;
+      if (buses != null) busCount = buses.length;
+    } catch (_) {}
 
-      debugPrint('Buses API response: $busesResult');
-
-      if (busesResult['success'] == true) {
-        final busList = busesResult['buses'];
-
-        if (busList is List) {
-          totalBuses = busList.length;
-        } else {
-          totalBuses = 0;
-        }
-      }
-    } catch (e) {
-      debugPrint('Error loading buses: $e');
-    }
-
-    // =========================
-    // LOAD DRIVERS
-    // =========================
     try {
       final driversResult = await ApiService.getDriversCount();
+      final drivers = driversResult['count'] as int?;
+      if (drivers != null) driverCount = drivers;
+    } catch (_) {}
 
-      debugPrint('Drivers API response: $driversResult');
-
-      if (driversResult['success'] == true) {
-        totalDrivers =
-            int.tryParse(driversResult['count'].toString()) ?? 0;
-      }
-    } catch (e) {
-      debugPrint('Error loading drivers: $e');
-    }
-
-    // =========================
-    // LOAD PARENTS
-    // =========================
     try {
       final parentsResult = await ApiService.getParentsCount();
+      final parents = parentsResult['count'] as int?;
+      if (parents != null) parentCount = parents;
+    } catch (_) {}
 
-      debugPrint('Parents API response: $parentsResult');
-
-      if (parentsResult['success'] == true) {
-        totalParents =
-            int.tryParse(parentsResult['count'].toString()) ?? 0;
-      }
-    } catch (e) {
-      debugPrint('Error loading parents: $e');
-    }
+    try {
+      final pendingResult = await ApiService.getPendingParentCount();
+      final pending = pendingResult['count'] as int?;
+      if (pending != null) pendingCount = pending;
+    } catch (_) {}
 
     if (!mounted) return;
 
     setState(() {
+      totalBuses = busCount;
+      totalDrivers = driverCount;
+      totalParents = parentCount;
+      pendingRequestsCount = pendingCount;
       loadingStats = false;
     });
   }
 
-  // =========================
+  Future<void> _openPendingRequests() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const PendingParentRequestsScreen(),
+      ),
+    );
+    _loadStats();
+  }
+
+  Future<void> _openChildAssignment() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ParentChildAssignmentScreen(),
+      ),
+    );
+    _loadStats();
+  }
+
+  // ============================================================
   // LOGOUT
-  // =========================
+  // ============================================================
+
   Future<void> _logout(BuildContext context) async {
     await SessionManager.clearSession();
 
@@ -118,9 +126,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // =========================
+  // ============================================================
   // OPEN MANAGE BUSES
-  // =========================
+  // ============================================================
+
   Future<void> _openManageBuses() async {
     await Navigator.push(
       context,
@@ -129,33 +138,79 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
     );
 
-    // Reload dashboard statistics
-    await _loadStats();
+    _loadStats();
   }
+
+  // ============================================================
+  // OPEN MANAGE DRIVERS
+  // ============================================================
+
+  Future<void> _openManageDrivers() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ManageDriversScreen(),
+      ),
+    );
+
+    _loadStats();
+  }
+
+  // ============================================================
+  // OPEN MANAGE PARENTS
+  // ============================================================
+
+  Future<void> _openManageParents() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ManageParentsScreen(),
+      ),
+    );
+
+    _loadStats();
+  }
+
+  // ============================================================
+  // BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
 
-      // =========================
+      // ========================================================
       // APP BAR
-      // =========================
+      // ========================================================
+
       appBar: AppBar(
-        title: const Text('Admin Dashboard'),
+        title: const Text(
+          'Admin Dashboard',
+        ),
         automaticallyImplyLeading: false,
         actions: [
           IconButton(
+            tooltip: 'Refresh',
+            icon: const Icon(
+              Icons.refresh,
+            ),
+            onPressed: _loadStats,
+          ),
+          IconButton(
             tooltip: 'Logout',
-            icon: const Icon(Icons.logout),
+            icon: const Icon(
+              Icons.logout,
+            ),
             onPressed: () => _logout(context),
           ),
         ],
       ),
 
-      // =========================
+      // ========================================================
       // DRAWER
-      // =========================
+      // ========================================================
+
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,
@@ -171,8 +226,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ],
                 ),
               ),
-              accountName: Text(widget.userName),
-              accountEmail: const Text('Admin'),
+              accountName: Text(
+                widget.userName,
+              ),
+              accountEmail: const Text(
+                'Administrator',
+              ),
               currentAccountPicture: const CircleAvatar(
                 backgroundColor: Colors.white,
                 child: Icon(
@@ -183,100 +242,212 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
             ),
 
-            // =========================
+            // --------------------------------------------------
             // MANAGE BUSES
-            // =========================
+            // --------------------------------------------------
+            // PENDING PARENT REQUESTS
+            // --------------------------------------------------
+
+            ListTile(
+              leading: const Icon(
+                Icons.hourglass_top,
+                color: AppColors.warning,
+              ),
+              title: Row(
+                children: [
+                  const Text('Pending Parent Requests'),
+                  if ((pendingRequestsCount ?? 0) > 0) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.warning,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${pendingRequestsCount ?? 0}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _openPendingRequests();
+              },
+            ),
+
+            // --------------------------------------------------
+            // MANAGE BUSES
+            // --------------------------------------------------
+
             ListTile(
               leading: const Icon(
                 Icons.directions_bus,
                 color: AppColors.primary,
               ),
-              title: const Text('Manage Buses'),
+              title: const Text(
+                'Manage Buses',
+              ),
               onTap: () {
                 Navigator.pop(context);
                 _openManageBuses();
               },
             ),
 
-            // =========================
+            // --------------------------------------------------
             // MANAGE DRIVERS
-            // =========================
+            // --------------------------------------------------
+
             ListTile(
               leading: const Icon(
                 Icons.people,
                 color: AppColors.primary,
               ),
-              title: const Text('Manage Drivers'),
-              onTap: () {},
+              title: const Text(
+                'Manage Drivers',
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _openManageDrivers();
+              },
             ),
 
-            // =========================
+            // --------------------------------------------------
             // MANAGE PARENTS
-            // =========================
+            // --------------------------------------------------
+
             ListTile(
               leading: const Icon(
                 Icons.family_restroom,
                 color: AppColors.primary,
               ),
-              title: const Text('Manage Parents'),
-              onTap: () {},
+              title: const Text(
+                'Manage Parents',
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _openManageParents();
+              },
             ),
 
-            // =========================
+            // --------------------------------------------------
+            // CHILD TRANSPORT ASSIGNMENT
+            // --------------------------------------------------
+
+            ListTile(
+              leading: const Icon(
+                Icons.assignment_ind,
+                color: AppColors.primary,
+              ),
+              title: const Text(
+                'Assign Bus / Transport',
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _openChildAssignment();
+              },
+            ),
+
+            // --------------------------------------------------
             // MANAGE ROUTES
-            // =========================
+            // --------------------------------------------------
+
             ListTile(
               leading: const Icon(
                 Icons.route,
                 color: AppColors.primary,
               ),
-              title: const Text('Manage Routes'),
-              onTap: () {},
+              title: const Text(
+                'Manage Routes',
+              ),
+              onTap: () {
+                Navigator.pop(context);
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Route management will be added next.',
+                    ),
+                  ),
+                );
+              },
             ),
 
-            // =========================
+            // --------------------------------------------------
             // REPORTS
-            // =========================
+            // --------------------------------------------------
+
             ListTile(
               leading: const Icon(
                 Icons.bar_chart,
                 color: AppColors.primary,
               ),
-              title: const Text('Reports'),
-              onTap: () {},
+              title: const Text(
+                'Reports',
+              ),
+              onTap: () {
+                Navigator.pop(context);
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Reports will be added later.',
+                    ),
+                  ),
+                );
+              },
             ),
 
             const Divider(),
 
-            // =========================
+            // --------------------------------------------------
             // LOGOUT
-            // =========================
+            // --------------------------------------------------
+
             ListTile(
               leading: const Icon(
                 Icons.logout,
                 color: AppColors.danger,
               ),
-              title: const Text('Logout'),
+              title: const Text(
+                'Logout',
+              ),
               onTap: () => _logout(context),
             ),
           ],
         ),
       ),
 
-      // =========================
-      // DASHBOARD BODY
-      // =========================
+      // ========================================================
+      // BODY
+      // ========================================================
+
       body: RefreshIndicator(
         onRefresh: _loadStats,
         child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(18),
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
+          ),
+          padding: EdgeInsets.fromLTRB(
+            18,
+            18,
+            18,
+            18 + MediaQuery.of(context).padding.bottom + 40,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // =========================
+              // ==================================================
               // OVERVIEW
-              // =========================
+              // ==================================================
+
               const Text(
                 'Overview',
                 style: TextStyle(
@@ -297,9 +468,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
               const SizedBox(height: 18),
 
-              // =========================
-              // STATISTICS
-              // =========================
+              // ==================================================
+              // STAT CARDS
+              // ==================================================
+
               GridView.count(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -312,7 +484,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   StatCard(
                     icon: Icons.directions_bus,
                     title: 'Total Buses',
-                    value: loadingStats ? '...' : '$totalBuses',
+                    value: loadingStats ? '…' : '${totalBuses ?? 0}',
                     color: AppColors.primary,
                     backgroundColor: AppColors.primaryLight,
                   ),
@@ -321,7 +493,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   StatCard(
                     icon: Icons.person,
                     title: 'Drivers',
-                    value: loadingStats ? '...' : '$totalDrivers',
+                    value: loadingStats ? '…' : '${totalDrivers ?? 0}',
                     color: AppColors.skyBlue,
                     backgroundColor: AppColors.primaryLight,
                   ),
@@ -330,27 +502,31 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   StatCard(
                     icon: Icons.people,
                     title: 'Parents',
-                    value: loadingStats ? '...' : '$totalParents',
+                    value: loadingStats ? '…' : '${totalParents ?? 0}',
                     color: AppColors.success,
                     backgroundColor: AppColors.successLight,
                   ),
 
-                  // RUNNING TRIPS
-                  const StatCard(
-                    icon: Icons.location_on,
-                    title: 'Running Trips',
-                    value: '0',
-                    color: AppColors.danger,
-                    backgroundColor: AppColors.dangerLight,
+                  // PENDING REQUESTS
+                  InkWell(
+                    onTap: _openPendingRequests,
+                    child: StatCard(
+                      icon: Icons.hourglass_top,
+                      title: 'Pending Requests',
+                      value: loadingStats ? '…' : '${pendingRequestsCount ?? 0}',
+                      color: AppColors.warning,
+                      backgroundColor: AppColors.warningLight,
+                    ),
                   ),
                 ],
               ),
 
               const SizedBox(height: 26),
 
-              // =========================
+              // ==================================================
               // QUICK ACTIONS
-              // =========================
+              // ==================================================
+
               const Text(
                 'Quick Actions',
                 style: TextStyle(
@@ -362,6 +538,28 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
               const SizedBox(height: 12),
 
+              // PENDING PARENT REQUESTS
+              InfoTile(
+                icon: Icons.hourglass_top,
+                title: 'Pending Parent Requests',
+                subtitle: (pendingRequestsCount ?? 0) > 0
+                    ? '$pendingRequestsCount parent request(s) awaiting approval'
+                    : 'Review parent registration requests',
+                color: AppColors.warning,
+                backgroundColor: AppColors.warningLight,
+                onTap: _openPendingRequests,
+              ),
+
+              // ASSIGN TRANSPORT
+              InfoTile(
+                icon: Icons.assignment_ind,
+                title: 'Assign Bus / Transport',
+                subtitle: 'Link Parent → Child and assign Bus & Route',
+                color: AppColors.primary,
+                backgroundColor: AppColors.primaryLight,
+                onTap: _openChildAssignment,
+              ),
+
               // MANAGE BUSES
               InfoTile(
                 icon: Icons.directions_bus,
@@ -372,11 +570,31 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 onTap: _openManageBuses,
               ),
 
+              // MANAGE DRIVERS
+              InfoTile(
+                icon: Icons.people,
+                title: 'Manage Drivers',
+                subtitle: 'Add, edit, or remove driver accounts',
+                color: AppColors.skyBlue,
+                backgroundColor: AppColors.primaryLight,
+                onTap: _openManageDrivers,
+              ),
+
+              // MANAGE PARENTS
+              InfoTile(
+                icon: Icons.family_restroom,
+                title: 'Manage Parents',
+                subtitle: 'Add, edit, or remove parent accounts',
+                color: AppColors.success,
+                backgroundColor: AppColors.successLight,
+                onTap: _openManageParents,
+              ),
+
               // ROUTES
               const InfoTile(
                 icon: Icons.route,
                 title: 'Routes',
-                subtitle: 'Assign buses & drivers to routes',
+                subtitle: 'Manage school bus routes',
                 color: AppColors.skyBlue,
                 backgroundColor: AppColors.primaryLight,
               ),

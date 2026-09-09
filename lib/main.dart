@@ -3,6 +3,7 @@ import 'package:routesafe/screens/splash/splash_screen.dart';
 import 'package:routesafe/utils/app_theme.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const RouteSafeApp());
 }
 

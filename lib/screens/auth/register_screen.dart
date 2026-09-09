@@ -19,12 +19,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final phoneController = TextEditingController();
   final passwordController = TextEditingController();
   final confirmPasswordController = TextEditingController();
+  final childNameController = TextEditingController();
+  final classNameController = TextEditingController();
 
   String role = "Parent";
 
   bool hidePassword = true;
   bool hideConfirmPassword = true;
   bool isLoading = false;
+
+  @override
+  void dispose() {
+    fullNameController.dispose();
+    emailController.dispose();
+    phoneController.dispose();
+    passwordController.dispose();
+    confirmPasswordController.dispose();
+    childNameController.dispose();
+    classNameController.dispose();
+    super.dispose();
+  }
 
   Future<void> submitRegistration() async {
     if (!_formKey.currentState!.validate()) return;
@@ -38,22 +52,50 @@ class _RegisterScreenState extends State<RegisterScreen> {
         phone: phoneController.text.trim(),
         password: passwordController.text,
         role: role,
+        childName: childNameController.text.trim(),
+        className: classNameController.text.trim(),
       );
 
       if (!mounted) return;
 
       final bool success = result["success"] == true;
-      final String message = result["message"] ?? "Something went wrong";
+      final String message = result["message"] ?? "Registration submitted. Please wait for Admin approval.";
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: success ? AppColors.success : AppColors.danger,
-        ),
-      );
-
-      if (success) {
-        Navigator.pop(context);
+      if (success && role == "Parent") {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogCtx) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.hourglass_top, color: AppColors.primary),
+                SizedBox(width: 8),
+                Text("Approval Pending"),
+              ],
+            ),
+            content: Text(
+              message.isNotEmpty
+                  ? message
+                  : "Registration submitted. Please wait for Admin approval.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text("OK"),
+              ),
+            ],
+          ),
+        );
+        if (mounted) Navigator.pop(context);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: success ? AppColors.success : AppColors.danger,
+          ),
+        );
+        if (success) {
+          Navigator.pop(context);
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -124,6 +166,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ],
                 onChanged: (value) => setState(() => role = value!),
               ),
+              if (role == "Parent") ...[
+                const SizedBox(height: 15),
+                CustomTextField(
+                  controller: childNameController,
+                  hintText: "Child Name",
+                  icon: Icons.child_care_outlined,
+                  validator: (value) {
+                    if (role == "Parent" && (value == null || value.trim().isEmpty)) {
+                      return "Child name is required";
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 15),
+                CustomTextField(
+                  controller: classNameController,
+                  hintText: "Class / Grade (e.g., 5-A)",
+                  icon: Icons.school_outlined,
+                ),
+              ],
               const SizedBox(height: 15),
               CustomTextField(
                 controller: passwordController,
