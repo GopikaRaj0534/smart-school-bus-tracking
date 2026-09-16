@@ -1,0 +1,276 @@
+import 'package:flutter/material.dart';
+import '../../services/api_service.dart';
+import '../../utils/app_colors.dart';
+
+class ManageRoutesScreen extends StatefulWidget {
+  const ManageRoutesScreen({super.key});
+
+  @override
+  State<ManageRoutesScreen> createState() => _ManageRoutesScreenState();
+}
+
+class _ManageRoutesScreenState extends State<ManageRoutesScreen> {
+  bool _isLoading = true;
+  List<Map<String, dynamic>> _routes = [];
+  List<Map<String, dynamic>> _stops = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
+    try {
+      final routesRes = await ApiService.getRoutes();
+      final stopsRes = await ApiService.getAdminStops();
+
+      setState(() {
+        _routes = routesRes['routes'] is List ? List<Map<String, dynamic>>.from(routesRes['routes']) : [];
+        _stops = stopsRes['stops'] is List ? List<Map<String, dynamic>>.from(stopsRes['stops']) : [];
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading routes: $e'), backgroundColor: AppColors.danger),
+        );
+      }
+    }
+  }
+
+  void _showAddRouteDialog() {
+    final routeController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add New Route'),
+        content: TextField(
+          controller: routeController,
+          decoration: const InputDecoration(labelText: 'Route Name (e.g. Thiruvalla East)', border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+            onPressed: () async {
+              final name = routeController.text.trim();
+              if (name.isNotEmpty) {
+                Navigator.pop(ctx);
+                await ApiService.addAdminRoute(name);
+                _loadData();
+              }
+            },
+            child: const Text('Add Route'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddStopDialog(int routeId) {
+    final nameController = TextEditingController();
+    final orderController = TextEditingController(text: '1');
+    final latController = TextEditingController();
+    final lngController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add Pickup Stop'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(labelText: 'Stop Name *', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: orderController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Stop Sequence Order', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: latController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Latitude (Optional)', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: lngController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Longitude (Optional)', border: OutlineInputBorder()),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+            onPressed: () async {
+              final name = nameController.text.trim();
+              if (name.isNotEmpty) {
+                Navigator.pop(ctx);
+                await ApiService.addAdminStop(
+                  routeId: routeId,
+                  stopName: name,
+                  stopOrder: int.tryParse(orderController.text) ?? 1,
+                  latitude: double.tryParse(latController.text),
+                  longitude: double.tryParse(lngController.text),
+                );
+                _loadData();
+              }
+            },
+            child: const Text('Add Stop'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _deleteRoute(int routeId, String routeName) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Route'),
+        content: Text('Are you sure you want to delete route "$routeName"? All associated stops will be removed.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await ApiService.deleteAdminRoute(routeId);
+              _loadData();
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _deleteStop(int stopId, String stopName) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Stop'),
+        content: Text('Remove stop "$stopName"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await ApiService.deleteAdminStop(stopId);
+              _loadData();
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Manage Routes & Pickup Stops'),
+        backgroundColor: AppColors.primaryDark,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        onPressed: _showAddRouteDialog,
+        icon: const Icon(Icons.add),
+        label: const Text('Add Route'),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _routes.isEmpty
+              ? const Center(child: Text('No routes created yet.'))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _routes.length,
+                  itemBuilder: (context, idx) {
+                    final r = _routes[idx];
+                    final routeId = r['route_id'] as int;
+                    final routeName = r['route_name']?.toString() ?? 'Route';
+
+                    final routeStops = _stops.where((s) => s['route_id'] == routeId).toList();
+                    routeStops.sort((a, b) => (a['stop_order'] ?? 0).compareTo(b['stop_order'] ?? 0));
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      elevation: 2,
+                      child: ExpansionTile(
+                        initiallyExpanded: true,
+                        leading: const Icon(Icons.alt_route, color: AppColors.primary, size: 28),
+                        title: Text(routeName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        subtitle: Text('${routeStops.length} Pickup Stops Defined'),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.add_location_alt, color: Colors.green),
+                              tooltip: 'Add Stop',
+                              onPressed: () => _showAddStopDialog(routeId),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              tooltip: 'Delete Route',
+                              onPressed: () => _deleteRoute(routeId, routeName),
+                            ),
+                          ],
+                        ),
+                        children: [
+                          if (routeStops.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(16.0),
+                              child: Text('No stops added to this route yet.', style: TextStyle(color: Colors.grey)),
+                            )
+                          else
+                            Column(
+                              children: routeStops.map((s) {
+                                final sId = s['stop_id'] as int;
+                                final sName = s['stop_name']?.toString() ?? 'Stop';
+                                final order = s['stop_order'] ?? 1;
+                                final lat = s['latitude'] ?? 'N/A';
+                                final lng = s['longitude'] ?? 'N/A';
+
+                                return ListTile(
+                                  dense: true,
+                                  leading: CircleAvatar(
+                                    radius: 14,
+                                    backgroundColor: AppColors.primaryLight,
+                                    child: Text('$order', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                                  ),
+                                  title: Text(sName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                  subtitle: Text('Lat: $lat, Lng: $lng'),
+                                  trailing: IconButton(
+                                    icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 18),
+                                    onPressed: () => _deleteStop(sId, sName),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+    );
+  }
+}
