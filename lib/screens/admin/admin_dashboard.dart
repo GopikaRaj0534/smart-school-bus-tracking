@@ -6,6 +6,7 @@ import 'package:routesafe/screens/admin/manage_buses_screen.dart';
 import 'package:routesafe/screens/admin/manage_drivers_screen.dart';
 import 'package:routesafe/screens/admin/manage_parents_screen.dart';
 import 'package:routesafe/screens/admin/manage_routes_screen.dart';
+import 'package:routesafe/screens/admin/manage_school_settings_screen.dart';
 import 'package:routesafe/screens/admin/parent_child_assignment_screen.dart';
 import 'package:routesafe/screens/admin/pending_driver_requests_screen.dart';
 import 'package:routesafe/screens/admin/pending_parent_requests_screen.dart';
@@ -14,6 +15,7 @@ import 'package:routesafe/services/api_service.dart';
 import 'package:routesafe/utils/app_colors.dart';
 import 'package:routesafe/utils/session_manager.dart';
 import 'package:routesafe/widgets/stat_card.dart';
+import 'package:routesafe/widgets/routesafe_logo.dart';
 
 class AdminDashboard extends StatefulWidget {
   final String userName;
@@ -213,6 +215,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _loadStats();
   }
 
+  Future<void> _openSchoolSettings() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ManageSchoolSettingsScreen(),
+      ),
+    );
+    _loadStats();
+  }
+
   Future<void> _logout(BuildContext context) async {
     await SessionManager.clearSession();
 
@@ -278,7 +290,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
                   return Card(
                     margin: const EdgeInsets.only(bottom: 8),
-                    color: AppColors.dangerLight.withValues(alpha: 0.3),
+                    color: AppColors.dangerLight.withOpacityCompat(0.3),
                     child: ListTile(
                       title: Text(
                         driverName,
@@ -322,9 +334,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text(
-          'Admin Dashboard',
-          style: TextStyle(fontWeight: FontWeight.bold),
+        title: const Row(
+          children: [
+            RouteSafeLogo(
+              fontSize: 19,
+              isDarkBackground: true,
+              showIcon: false,
+            ),
+            SizedBox(width: 8),
+            Text(
+              'Admin Dashboard',
+              style: TextStyle(fontSize: 14, color: Colors.white70),
+            ),
+          ],
         ),
         elevation: 0,
         actions: [
@@ -344,7 +366,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            UserAccountsDrawerHeader(
+            DrawerHeader(
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
@@ -355,18 +377,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ],
                 ),
               ),
-              accountName: Text(
-                widget.userName,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-              accountEmail: const Text('Fleet Administrator'),
-              currentAccountPicture: const CircleAvatar(
-                backgroundColor: Colors.white,
-                child: Icon(
-                  Icons.admin_panel_settings_rounded,
-                  color: AppColors.primary,
-                  size: 38,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const RouteSafeLogo(
+                    isDarkBackground: true,
+                    fontSize: 22,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    widget.userName,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+                  ),
+                  const Text(
+                    'Fleet Administrator',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
               ),
             ),
             ListTile(
@@ -463,6 +491,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.school_rounded, color: AppColors.primary),
+              title: const Text('School Settings'),
+              onTap: () {
+                Navigator.pop(context);
+                _openSchoolSettings();
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.assignment_ind_rounded, color: AppColors.primary),
               title: const Text('Link Parent & Child'),
               onTap: () {
@@ -524,7 +560,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
                     BoxShadow(
-                      color: AppColors.primary.withValues(alpha: 0.25),
+                      color: AppColors.primary.withOpacityCompat(0.25),
                       blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),
@@ -571,9 +607,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
-                          color: AppColors.warning.withValues(alpha: 0.2),
+                          color: AppColors.warning.withOpacityCompat(0.2),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.warning.withValues(alpha: 0.5)),
+                          border: Border.all(color: AppColors.warning.withOpacityCompat(0.5)),
                         ),
                         child: Row(
                           children: [
@@ -683,6 +719,66 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ),
                 ],
               ),
+              const SizedBox(height: 18),
+
+              // Interactive Analytics Preview Action Banner
+              InkWell(
+                onTap: _openAdminAnalytics,
+                borderRadius: BorderRadius.circular(18),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        AppColors.primaryLight,
+                        Colors.blue.shade50,
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: AppColors.primary.withOpacityCompat(0.3), width: 1.5),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Icon(Icons.bar_chart_rounded, color: Colors.white, size: 26),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Interactive Fleet Analytics & Charts',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.primaryDark,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'View student boarding pie chart, trip completion rates & fleet utilization',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.arrow_forward_ios_rounded, color: AppColors.primary, size: 16),
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: 26),
 
               // Quick Actions Section Title
@@ -715,6 +811,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 color: AppColors.warning,
                 backgroundColor: AppColors.warningLight,
                 onTap: _openPendingRequests,
+              ),
+              InfoTile(
+                icon: Icons.school_rounded,
+                title: 'School Settings',
+                subtitle: 'Manage fixed school location, coordinates & destination point',
+                color: AppColors.primary,
+                backgroundColor: AppColors.primaryLight,
+                onTap: _openSchoolSettings,
               ),
               InfoTile(
                 icon: Icons.route_rounded,
