@@ -251,10 +251,14 @@ class _PendingDriverRequestsScreenState
       ),
     );
 
-    if (confirm != true || !mounted) return;
+    if (confirm != true || !mounted) {
+      reasonController.dispose();
+      return;
+    }
 
     try {
       final result = await ApiService.rejectDriver(driverId, reasonController.text.trim());
+      reasonController.dispose();
 
       if (!mounted) return;
 
@@ -272,6 +276,7 @@ class _PendingDriverRequestsScreenState
         _loadRequests();
       }
     } catch (e) {
+      reasonController.dispose();
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -402,7 +407,7 @@ class _PendingDriverRequestsScreenState
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: AppColors.warning.withValues(alpha: 0.15),
+                          color: AppColors.warning.withOpacityCompat(0.15),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: const Icon(Icons.drive_eta,
@@ -435,7 +440,7 @@ class _PendingDriverRequestsScreenState
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: AppColors.warning.withValues(alpha: 0.2),
+                          color: AppColors.warning.withOpacityCompat(0.2),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: const Text(
