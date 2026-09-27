@@ -96,8 +96,9 @@ class _ManageParentsScreenState
 
     final formKey = GlobalKey<FormState>();
 
-    await showDialog<void>(
+    final bool? shouldRefresh = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (dialogContext) {
         bool obscurePassword = true;
         bool isSaving = false;
@@ -244,7 +245,7 @@ class _ManageParentsScreenState
                   onPressed: isSaving
                       ? null
                       : () {
-                          Navigator.pop(dialogContext);
+                          Navigator.of(dialogContext).pop(false);
                         },
                   child: const Text('Cancel'),
                 ),
@@ -322,24 +323,7 @@ class _ManageParentsScreenState
                             // ==================================================
 
                             if (result['success'] == true) {
-                              Navigator.pop(dialogContext);
-
-                              if (!mounted) return;
-
-                              ScaffoldMessenger.of(context)
-                                  .showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    result['message']
-                                            ?.toString() ??
-                                        'Parent saved successfully',
-                                  ),
-                                  backgroundColor:
-                                      AppColors.success,
-                                ),
-                              );
-
-                              await _loadParents();
+                              Navigator.of(dialogContext).pop(true);
                             }
 
                             // ==================================================
@@ -413,11 +397,24 @@ class _ManageParentsScreenState
       },
     );
 
-    // Dispose controllers after dialog closes.
     nameController.dispose();
     emailController.dispose();
     phoneController.dispose();
     passwordController.dispose();
+
+    if (shouldRefresh == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            existingParent == null
+                ? 'Parent added successfully'
+                : 'Parent updated successfully',
+          ),
+          backgroundColor: AppColors.success,
+        ),
+      );
+      await _loadParents();
+    }
   }
 
   // ============================================================
