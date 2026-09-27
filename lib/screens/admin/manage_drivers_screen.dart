@@ -97,115 +97,78 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
 
     bool obscurePassword = true;
 
-    await showDialog(
+    bool isSaving = false;
+    String? dialogError;
+
+    final bool? shouldRefresh = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (dialogContext, setDialogState) {
             return AlertDialog(
               title: Text(
-                existingDriver == null
-                    ? 'Add Driver'
-                    : 'Edit Driver',
+                existingDriver == null ? 'Add Driver' : 'Edit Driver',
               ),
-
               content: SingleChildScrollView(
                 child: Form(
                   key: formKey,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-
-                      // ==================================================
-                      // FULL NAME
-                      // ==================================================
-
                       TextFormField(
                         controller: nameController,
-                        textCapitalization:
-                            TextCapitalization.words,
+                        textCapitalization: TextCapitalization.words,
                         decoration: const InputDecoration(
                           labelText: 'Full Name',
-                          prefixIcon:
-                              Icon(Icons.person_outline),
+                          prefixIcon: Icon(Icons.person_outline),
                         ),
                         validator: (value) {
-                          if (value == null ||
-                              value.trim().isEmpty) {
+                          if (value == null || value.trim().isEmpty) {
                             return 'Name is required';
                           }
-
                           return null;
                         },
                       ),
-
                       const SizedBox(height: 12),
-
-                      // ==================================================
-                      // EMAIL
-                      // ==================================================
-
                       TextFormField(
                         controller: emailController,
-                        keyboardType:
-                            TextInputType.emailAddress,
+                        keyboardType: TextInputType.emailAddress,
                         decoration: const InputDecoration(
                           labelText: 'Email',
-                          prefixIcon:
-                              Icon(Icons.email_outlined),
+                          prefixIcon: Icon(Icons.email_outlined),
                         ),
                         validator: (value) {
-                          if (value == null ||
-                              value.trim().isEmpty) {
+                          if (value == null || value.trim().isEmpty) {
                             return 'Email is required';
                           }
-
-                          if (!value.contains('@') ||
-                              !value.contains('.')) {
+                          if (!value.contains('@') || !value.contains('.')) {
                             return 'Enter a valid email';
                           }
-
                           return null;
                         },
                       ),
-
                       const SizedBox(height: 12),
-
-                      // ==================================================
-                      // PHONE
-                      // ==================================================
-
                       TextFormField(
                         controller: phoneController,
-                        keyboardType:
-                            TextInputType.phone,
+                        keyboardType: TextInputType.phone,
                         maxLength: 10,
                         decoration: const InputDecoration(
                           labelText: 'Phone Number',
-                          prefixIcon:
-                              Icon(Icons.phone_outlined),
+                          prefixIcon: Icon(Icons.phone_outlined),
                           counterText: '',
                         ),
                         validator: (value) {
-                          if (value == null ||
-                              value.trim().isEmpty) {
+                          if (value == null || value.trim().isEmpty) {
                             return 'Phone number is required';
                           }
-
                           if (value.trim().length != 10) {
                             return 'Enter a 10-digit phone number';
                           }
-
                           return null;
                         },
                       ),
-
                       const SizedBox(height: 12),
-
-                      // ==================================================
-                      // LICENSE NUMBER
-                      // ==================================================
-
                       TextFormField(
                         controller: licenseController,
                         textCapitalization: TextCapitalization.characters,
@@ -214,11 +177,7 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                           prefixIcon: Icon(Icons.badge_outlined),
                         ),
                       ),
-
-                      // ==================================================
-                      // PASSWORD
-                      // ==================================================
-
+                      const SizedBox(height: 12),
                       TextFormField(
                         controller: passwordController,
                         obscureText: obscurePassword,
@@ -226,8 +185,7 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                           labelText: existingDriver == null
                               ? 'Password'
                               : 'New Password (optional)',
-                          prefixIcon:
-                              const Icon(Icons.lock_outline),
+                          prefixIcon: const Icon(Icons.lock_outline),
                           suffixIcon: IconButton(
                             icon: Icon(
                               obscurePassword
@@ -236,118 +194,100 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                             ),
                             onPressed: () {
                               setDialogState(() {
-                                obscurePassword =
-                                    !obscurePassword;
+                                obscurePassword = !obscurePassword;
                               });
                             },
                           ),
                         ),
                         validator: (value) {
                           if (existingDriver == null) {
-                            if (value == null ||
-                                value.trim().isEmpty) {
+                            if (value == null || value.trim().isEmpty) {
                               return 'Password is required';
                             }
-
                             if (value.trim().length < 6) {
                               return 'Password must be at least 6 characters';
                             }
                           }
-
                           return null;
                         },
                       ),
+                      if (dialogError != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          dialogError!,
+                          style: const TextStyle(color: AppColors.danger, fontSize: 13),
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ),
-
-              // ==========================================================
-              // BUTTONS
-              // ==========================================================
-
               actions: [
                 TextButton(
-                  onPressed: () {
-                    Navigator.pop(dialogContext);
-                  },
+                  onPressed: isSaving
+                      ? null
+                      : () {
+                          Navigator.of(dialogContext).pop(false);
+                        },
                   child: const Text('Cancel'),
                 ),
-
                 ElevatedButton(
-                  onPressed: () async {
-                    if (!formKey.currentState!.validate()) {
-                      return;
-                    }
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          if (!formKey.currentState!.validate()) {
+                            return;
+                          }
 
-                    Map<String, dynamic> result;
+                          setDialogState(() {
+                            isSaving = true;
+                            dialogError = null;
+                          });
 
-                    // ====================================================
-                    // ADD DRIVER
-                    // ====================================================
+                          try {
+                            Map<String, dynamic> result;
+                            if (existingDriver == null) {
+                              result = await ApiService.addDriver(
+                                fullName: nameController.text.trim(),
+                                email: emailController.text.trim(),
+                                phone: phoneController.text.trim(),
+                                password: passwordController.text.trim(),
+                              );
+                            } else {
+                              result = await ApiService.updateDriver(
+                                driverId: existingDriver['user_id'],
+                                fullName: nameController.text.trim(),
+                                email: emailController.text.trim(),
+                                phone: phoneController.text.trim(),
+                                password: passwordController.text.trim(),
+                              );
+                            }
 
-                    if (existingDriver == null) {
-                      result = await ApiService.addDriver(
-                        fullName:
-                            nameController.text.trim(),
-                        email:
-                            emailController.text.trim(),
-                        phone:
-                            phoneController.text.trim(),
-                        password:
-                            passwordController.text.trim(),
-                      );
-                    }
+                            if (!dialogContext.mounted) return;
 
-                    // ====================================================
-                    // UPDATE DRIVER
-                    // ====================================================
-
-                    else {
-                      result = await ApiService.updateDriver(
-                        driverId:
-                            existingDriver['user_id'],
-                        fullName:
-                            nameController.text.trim(),
-                        email:
-                            emailController.text.trim(),
-                        phone:
-                            phoneController.text.trim(),
-                        password:
-                            passwordController.text.trim(),
-                      );
-                    }
-
-                    if (!dialogContext.mounted) return;
-
-                    if (result['success'] == true) {
-                      Navigator.pop(dialogContext);
-                    }
-
-                    if (!mounted) return;
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          result['message']?.toString() ??
-                              'Done',
-                        ),
-                        backgroundColor:
-                            result['success'] == true
-                                ? AppColors.success
-                                : AppColors.danger,
-                      ),
-                    );
-
-                    if (result['success'] == true) {
-                      _loadDrivers();
-                    }
-                  },
-                  child: Text(
-                    existingDriver == null
-                        ? 'Add'
-                        : 'Save',
-                  ),
+                            if (result['success'] == true) {
+                              Navigator.of(dialogContext).pop(true);
+                            } else {
+                              setDialogState(() {
+                                isSaving = false;
+                                dialogError = result['message']?.toString() ?? 'Operation failed';
+                              });
+                            }
+                          } catch (e) {
+                            if (!dialogContext.mounted) return;
+                            setDialogState(() {
+                              isSaving = false;
+                              dialogError = e.toString().replaceFirst('Exception: ', '');
+                            });
+                          }
+                        },
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(existingDriver == null ? 'Add' : 'Save'),
                 ),
               ],
             );
@@ -359,7 +299,22 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
     nameController.dispose();
     emailController.dispose();
     phoneController.dispose();
+    licenseController.dispose();
     passwordController.dispose();
+
+    if (shouldRefresh == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            existingDriver == null
+                ? 'Driver added successfully'
+                : 'Driver updated successfully',
+          ),
+          backgroundColor: AppColors.success,
+        ),
+      );
+      _loadDrivers();
+    }
   }
 
   // ============================================================
@@ -437,6 +392,81 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
               'Exception: ',
               '',
             ),
+          ),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    }
+  }
+
+  // ============================================================
+  // RESET DRIVER 2FA
+  // ============================================================
+
+  Future<void> _confirmReset2FA(
+    Map<String, dynamic> driver,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Reset Driver 2FA'),
+          content: Text(
+            'Reset Two-Factor Authentication for driver ${driver['full_name']}?\n\n'
+            'This will disable 2FA for their account so they can log in if their phone was lost.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(dialogContext, false);
+              },
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.warning,
+                foregroundColor: Colors.black,
+              ),
+              onPressed: () {
+                Navigator.pop(dialogContext, true);
+              },
+              child: const Text('Reset 2FA'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final driverId = int.tryParse(driver['user_id']?.toString() ?? '');
+      if (driverId == null) return;
+
+      final result = await ApiService.adminResetDriver2FA(driverId);
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result['message']?.toString() ?? 'Done',
+          ),
+          backgroundColor:
+              result['success'] == true
+                  ? AppColors.success
+                  : AppColors.danger,
+        ),
+      );
+
+      if (result['success'] == true) {
+        _loadDrivers();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.toString().replaceFirst('Exception: ', ''),
           ),
           backgroundColor: AppColors.danger,
         ),
@@ -693,36 +723,31 @@ class _ManageDriversScreenState extends State<ManageDriversScreen> {
                                   // ======================================
 
                                   PopupMenuButton<String>(
-                                    onSelected:
-                                        (value) {
-                                      if (value ==
-                                          'edit') {
+                                    onSelected: (value) {
+                                      if (value == 'edit') {
                                         _showDriverForm(
-                                          existingDriver:
-                                              driver,
+                                          existingDriver: driver,
                                         );
                                       }
-
-                                      if (value ==
-                                          'delete') {
-                                        _confirmDelete(
-                                          driver,
-                                        );
+                                      if (value == 'delete') {
+                                        _confirmDelete(driver);
+                                      }
+                                      if (value == 'reset_2fa') {
+                                        _confirmReset2FA(driver);
                                       }
                                     },
-
-                                    itemBuilder:
-                                        (context) =>
-                                            const [
-                                      PopupMenuItem(
+                                    itemBuilder: (context) => [
+                                      const PopupMenuItem(
                                         value: 'edit',
-                                        child:
-                                            Text('Edit'),
+                                        child: Text('Edit'),
                                       ),
-                                      PopupMenuItem(
+                                      const PopupMenuItem(
+                                        value: 'reset_2fa',
+                                        child: Text('Reset 2FA Security'),
+                                      ),
+                                      const PopupMenuItem(
                                         value: 'delete',
-                                        child:
-                                            Text('Delete'),
+                                        child: Text('Delete'),
                                       ),
                                     ],
                                   ),
