@@ -41,141 +41,240 @@ class _ManageRoutesScreenState extends State<ManageRoutesScreen> {
     }
   }
 
-  void _showAddRouteDialog() {
+  Future<void> _showAddRouteDialog() async {
     final routeController = TextEditingController();
-    showDialog(
+    final bool? shouldRefresh = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add New Route'),
-        content: TextField(
-          controller: routeController,
-          decoration: const InputDecoration(labelText: 'Route Name (e.g. Thiruvalla East)', border: OutlineInputBorder()),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
-            onPressed: () async {
-              final name = routeController.text.trim();
-              if (name.isNotEmpty) {
-                Navigator.pop(ctx);
-                await ApiService.addAdminRoute(name);
-                _loadData();
-              }
-            },
-            child: const Text('Add Route'),
-          ),
-        ],
-      ),
+      barrierDismissible: false,
+      builder: (ctx) {
+        bool isSaving = false;
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('Add New Route'),
+              content: TextField(
+                controller: routeController,
+                decoration: const InputDecoration(
+                  labelText: 'Route Name (e.g. Thiruvalla East)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSaving ? null : () => Navigator.of(ctx).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          final name = routeController.text.trim();
+                          if (name.isEmpty) return;
+                          setDialogState(() => isSaving = true);
+                          try {
+                            await ApiService.addAdminRoute(name);
+                            if (!ctx.mounted) return;
+                            Navigator.of(ctx).pop(true);
+                          } catch (e) {
+                            if (!ctx.mounted) return;
+                            setDialogState(() => isSaving = false);
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(
+                                content: Text(e.toString().replaceFirst('Exception: ', '')),
+                                backgroundColor: AppColors.danger,
+                              ),
+                            );
+                          }
+                        },
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('Add Route'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
+
+    routeController.dispose();
+
+    if (shouldRefresh == true && mounted) {
+      _loadData();
+    }
   }
 
-  void _showAddStopDialog(int routeId) {
+  Future<void> _showAddStopDialog(int routeId) async {
     final nameController = TextEditingController();
     final orderController = TextEditingController(text: '1');
     final latController = TextEditingController();
     final lngController = TextEditingController();
 
-    showDialog(
+    final bool? shouldRefresh = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add Pickup Stop'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(labelText: 'Stop Name *', border: OutlineInputBorder()),
+      barrierDismissible: false,
+      builder: (ctx) {
+        bool isSaving = false;
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('Add Pickup Stop'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(labelText: 'Stop Name *', border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: orderController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Stop Sequence Order', border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: latController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: 'Latitude (Optional)', border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: lngController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: 'Longitude (Optional)', border: OutlineInputBorder()),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: orderController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Stop Sequence Order', border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: latController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Latitude (Optional)', border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: lngController,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Longitude (Optional)', border: OutlineInputBorder()),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
-            onPressed: () async {
-              final name = nameController.text.trim();
-              if (name.isNotEmpty) {
-                Navigator.pop(ctx);
-                await ApiService.addAdminStop(
-                  routeId: routeId,
-                  stopName: name,
-                  stopOrder: int.tryParse(orderController.text) ?? 1,
-                  latitude: double.tryParse(latController.text),
-                  longitude: double.tryParse(lngController.text),
-                );
-                _loadData();
-              }
-            },
-            child: const Text('Add Stop'),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: isSaving ? null : () => Navigator.of(ctx).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          final name = nameController.text.trim();
+                          if (name.isEmpty) return;
+                          setDialogState(() => isSaving = true);
+                          try {
+                            await ApiService.addAdminStop(
+                              routeId: routeId,
+                              stopName: name,
+                              stopOrder: int.tryParse(orderController.text) ?? 1,
+                              latitude: double.tryParse(latController.text),
+                              longitude: double.tryParse(lngController.text),
+                            );
+                            if (!ctx.mounted) return;
+                            Navigator.of(ctx).pop(true);
+                          } catch (e) {
+                            if (!ctx.mounted) return;
+                            setDialogState(() => isSaving = false);
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(
+                                content: Text(e.toString().replaceFirst('Exception: ', '')),
+                                backgroundColor: AppColors.danger,
+                              ),
+                            );
+                          }
+                        },
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('Add Stop'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
+
+    nameController.dispose();
+    orderController.dispose();
+    latController.dispose();
+    lngController.dispose();
+
+    if (shouldRefresh == true && mounted) {
+      _loadData();
+    }
   }
 
-  void _deleteRoute(int routeId, String routeName) {
-    showDialog(
+  Future<void> _deleteRoute(int routeId, String routeName) async {
+    final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Route'),
         content: Text('Are you sure you want to delete route "$routeName"? All associated stops will be removed.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              await ApiService.deleteAdminRoute(routeId);
-              _loadData();
-            },
+            onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Delete'),
           ),
         ],
       ),
     );
+
+    if (confirmed == true && mounted) {
+      try {
+        await ApiService.deleteAdminRoute(routeId);
+        if (mounted) _loadData();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Delete failed: $e'), backgroundColor: AppColors.danger),
+          );
+        }
+      }
+    }
   }
 
-  void _deleteStop(int stopId, String stopName) {
-    showDialog(
+  Future<void> _deleteStop(int stopId, String stopName) async {
+    final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Stop'),
         content: Text('Remove stop "$stopName"?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              await ApiService.deleteAdminStop(stopId);
-              _loadData();
-            },
+            onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Delete'),
           ),
         ],
       ),
     );
+
+    if (confirmed == true && mounted) {
+      try {
+        await ApiService.deleteAdminStop(stopId);
+        if (mounted) _loadData();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Delete failed: $e'), backgroundColor: AppColors.danger),
+          );
+        }
+      }
+    }
   }
 
   @override
