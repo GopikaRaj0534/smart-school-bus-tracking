@@ -48,7 +48,7 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
     }
   }
 
-  void _showStudentDialog([Map<String, dynamic>? student]) {
+  Future<void> _showStudentDialog([Map<String, dynamic>? student]) async {
     final isEdit = student != null;
     final nameController = TextEditingController(text: student?['child_name']?.toString() ?? '');
     final classController = TextEditingController(text: student?['class_name']?.toString() ?? '');
@@ -57,9 +57,11 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
     int? selectedBusId = student?['bus_id'] is int ? student!['bus_id'] : null;
     int? selectedStopId = student?['pickup_stop_id'] is int ? student!['pickup_stop_id'] : null;
 
-    showDialog(
+    final bool? shouldRefresh = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (dialogCtx) {
+        bool isSaving = false;
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
             return AlertDialog(
@@ -118,36 +120,59 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
                 ),
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
+                TextButton(
+                  onPressed: isSaving ? null : () => Navigator.of(dialogCtx).pop(false),
+                  child: const Text('Cancel'),
+                ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
-                  onPressed: () async {
-                    final name = nameController.text.trim();
-                    if (name.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Student name is required')),
-                      );
-                      return;
-                    }
-                    Navigator.pop(dialogCtx);
-                    if (isEdit) {
-                      await ApiService.assignChildTransport(
-                        childId: student['child_id'] as int,
-                        busId: selectedBusId ?? 0,
-                        pickupStopId: selectedStopId,
-                      );
-                    } else {
-                      await ApiService.assignChild(
-                        parentId: selectedParentId,
-                        childName: name,
-                        className: classController.text.trim(),
-                        busId: selectedBusId,
-                        pickupStopId: selectedStopId,
-                      );
-                    }
-                    _loadData();
-                  },
-                  child: Text(isEdit ? 'Save Changes' : 'Add Student'),
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          final name = nameController.text.trim();
+                          if (name.isEmpty) {
+                            ScaffoldMessenger.of(dialogCtx).showSnackBar(
+                              const SnackBar(content: Text('Student name is required')),
+                            );
+                            return;
+                          }
+                          setDialogState(() => isSaving = true);
+                          try {
+                            if (isEdit) {
+                              await ApiService.assignChildTransport(
+                                childId: student['child_id'] as int,
+                                busId: selectedBusId ?? 0,
+                                pickupStopId: selectedStopId,
+                              );
+                            } else {
+                              await ApiService.assignChild(
+                                parentId: selectedParentId,
+                                childName: name,
+                                className: classController.text.trim(),
+                                busId: selectedBusId,
+                                pickupStopId: selectedStopId,
+                              );
+                            }
+                            if (!dialogCtx.mounted) return;
+                            Navigator.of(dialogCtx).pop(true);
+                          } catch (e) {
+                            if (!dialogCtx.mounted) return;
+                            setDialogState(() => isSaving = false);
+                            ScaffoldMessenger.of(dialogCtx).showSnackBar(
+                              SnackBar(
+                                content: Text(e.toString().replaceFirst('Exception: ', '')),
+                                backgroundColor: AppColors.danger,
+                              ),
+                            );
+                          }
+                        },
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : Text(isEdit ? 'Save Changes' : 'Add Student'),
                 ),
               ],
             );
@@ -155,10 +180,17 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
         );
       },
     );
+
+    nameController.dispose();
+    classController.dispose();
+
+    if (shouldRefresh == true && mounted) {
+      _loadData();
+    }
   }
 
-  void _deleteStudent(int childId, String childName) {
-    showDialog(
+  Future<void> _deleteStudent(int childId, String childName) async {
+    final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Row(
@@ -170,27 +202,28 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
         ),
         content: Text('Are you sure you want to delete student "$childName"? This action cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              try {
-                await ApiService.deleteChild(childId);
-                _loadData();
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error deleting student: $e'), backgroundColor: AppColors.danger),
-                  );
-                }
-              }
-            },
+            onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Delete'),
           ),
         ],
       ),
     );
+
+    if (confirmed == true && mounted) {
+      try {
+        await ApiService.deleteChild(childId);
+        if (mounted) _loadData();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error deleting student: $e'), backgroundColor: AppColors.danger),
+          );
+        }
+      }
+    }
   }
 
   @override
