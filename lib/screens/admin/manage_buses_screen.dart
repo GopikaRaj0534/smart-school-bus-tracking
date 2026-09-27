@@ -251,664 +251,169 @@ class _ManageBusesScreenState
     // SHOW DIALOG
     // ------------------------------------------------------------
 
-    await showDialog(
+    final bool? shouldRefresh = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (dialogContext) {
-
         bool isSaving = false;
 
         return StatefulBuilder(
-          builder: (
-            context,
-            setDialogState,
-          ) {
-
-            // ------------------------------------------------------
-            // CREATE ROUTE DROPDOWN VALUES
-            // ------------------------------------------------------
-
-            final routeValues =
-                routes
-                    .map(
-                      (route) =>
-                          route['route_name']
-                              ?.toString()
-                              .trim() ??
-                          '',
-                    )
-                    .where(
-                      (name) =>
-                          name.isNotEmpty,
-                    )
-                    .toSet()
-                    .toList();
-
-            // ------------------------------------------------------
-            // VALIDATE EXISTING ROUTE
-            // ------------------------------------------------------
+          builder: (dialogContext, setDialogState) {
+            final routeValues = routes
+                .map((route) => route['route_name']?.toString().trim() ?? '')
+                .where((name) => name.isNotEmpty)
+                .toSet()
+                .toList();
 
             String? dropdownValue;
-
-            if (selectedRoute != null &&
-                routeValues.contains(
-                  selectedRoute,
-                )) {
-
-              dropdownValue =
-                  selectedRoute;
+            if (selectedRoute != null && routeValues.contains(selectedRoute)) {
+              dropdownValue = selectedRoute;
             }
 
             return AlertDialog(
-              title: Text(
-                existingBus == null
-                    ? 'Add Bus'
-                    : 'Edit Bus',
-              ),
-
-              content:
-                  SingleChildScrollView(
+              title: Text(existingBus == null ? 'Add Bus' : 'Edit Bus'),
+              content: SingleChildScrollView(
                 child: Form(
                   key: formKey,
-
                   child: Column(
-                    mainAxisSize:
-                        MainAxisSize.min,
-
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-
-                      // ==========================================
-                      // BUS NUMBER
-                      // ==========================================
-
                       TextFormField(
-                        controller:
-                            busNumberController,
-
-                        decoration:
-                            const InputDecoration(
-                          labelText:
-                              'Bus Number',
-
-                          prefixIcon:
-                              Icon(
-                            Icons
-                                .directions_bus,
-                          ),
+                        controller: busNumberController,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: const InputDecoration(
+                          labelText: 'Bus Number (e.g. Bus 101)',
+                          prefixIcon: Icon(Icons.directions_bus),
                         ),
-
-                        validator: (value) {
-
-                          if (value == null ||
-                              value
-                                  .trim()
-                                  .isEmpty) {
-
-                            return
-                                'Bus number is required';
-                          }
-
-                          return null;
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Bus number is required' : null,
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: dropdownValue,
+                        decoration: const InputDecoration(
+                          labelText: 'Assigned Route',
+                          prefixIcon: Icon(Icons.alt_route),
+                        ),
+                        items: routeValues.map((name) {
+                          return DropdownMenuItem(value: name, child: Text(name));
+                        }).toList(),
+                        onChanged: (val) {
+                          setDialogState(() {
+                            selectedRoute = val;
+                          });
                         },
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Route selection is required' : null,
                       ),
-
-                      const SizedBox(
-                        height: 14,
-                      ),
-
-                      // ==========================================
-                      // ROUTE DROPDOWN
-                      // ==========================================
-
-                      if (routesLoading)
-
-                        const InputDecorator(
-                          decoration:
-                              InputDecoration(
-                            labelText:
-                                'Route',
-
-                            prefixIcon:
-                                Icon(
-                              Icons.route,
-                            ),
-                          ),
-
-                          child: Row(
-                            children: [
-
-                              SizedBox(
-                                width: 18,
-                                height: 18,
-
-                                child:
-                                    CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              ),
-
-                              SizedBox(
-                                width: 10,
-                              ),
-
-                              Text(
-                                'Loading routes...',
-                              ),
-                            ],
-                          ),
-                        )
-
-                      else if (routeValues.isEmpty)
-
-                        InputDecorator(
-                          decoration:
-                              const InputDecoration(
-                            labelText:
-                                'Route',
-
-                            prefixIcon:
-                                Icon(
-                              Icons.route,
-                            ),
-                          ),
-
-                          child: Row(
-                            children: [
-
-                              const Expanded(
-                                child: Text(
-                                  'No routes available',
-                                  style:
-                                      TextStyle(
-                                    color:
-                                        AppColors
-                                            .danger,
-                                  ),
-                                ),
-                              ),
-
-                              IconButton(
-                                tooltip:
-                                    'Refresh routes',
-
-                                icon:
-                                    const Icon(
-                                  Icons.refresh,
-                                ),
-
-                                onPressed:
-                                    isSaving
-                                        ? null
-                                        : () async {
-
-                                            await _loadRoutes();
-
-                                            if (!context
-                                                .mounted) {
-                                              return;
-                                            }
-
-                                            setDialogState(
-                                              () {},
-                                            );
-                                          },
-                              ),
-                            ],
-                          ),
-                        )
-
-                      else
-
-                        DropdownButtonFormField<
-                            String>(
-                          initialValue:
-                              dropdownValue,
-
-                          isExpanded: true,
-
-                          decoration:
-                              const InputDecoration(
-                            labelText:
-                                'Route',
-
-                            prefixIcon:
-                                Icon(
-                              Icons.route,
-                            ),
-                          ),
-
-                          hint:
-                              const Text(
-                            'Select route',
-                          ),
-
-                          items:
-                              routeValues
-                                  .map(
-                                    (
-                                      routeName,
-                                    ) {
-
-                                      return DropdownMenuItem<
-                                          String>(
-                                        value:
-                                            routeName,
-
-                                        child:
-                                            Text(
-                                          routeName,
-
-                                          overflow:
-                                              TextOverflow
-                                                  .ellipsis,
-                                        ),
-                                      );
-                                    },
-                                  )
-                                  .toList(),
-
-                          onChanged:
-                              isSaving
-                                  ? null
-                                  : (
-                                      value,
-                                    ) {
-
-                                      setDialogState(
-                                        () {
-
-                                          selectedRoute =
-                                              value;
-                                        },
-                                      );
-                                    },
-
-                          validator:
-                              (value) {
-
-                            if (value ==
-                                    null ||
-                                value
-                                    .trim()
-                                    .isEmpty) {
-
-                              return
-                                  'Please select a route';
-                            }
-
-                            return null;
-                          },
-                        ),
-
-                      const SizedBox(
-                        height: 14,
-                      ),
-
-                      // ==========================================
-                      // DRIVER
-                      // ==========================================
-
+                      const SizedBox(height: 12),
                       TextFormField(
-                        controller:
-                            driverController,
-
-                        decoration:
-                            const InputDecoration(
-                          labelText:
-                              'Driver Name',
-
-                          prefixIcon:
-                              Icon(
-                            Icons.person,
-                          ),
+                        controller: driverController,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: const InputDecoration(
+                          labelText: 'Assigned Driver Name (Optional)',
+                          prefixIcon: Icon(Icons.person),
                         ),
                       ),
-
-                      const SizedBox(
-                        height: 14,
-                      ),
-
-                      // ==========================================
-                      // STATUS
-                      // ==========================================
-
-                      DropdownButtonFormField<
-                          String>(
-                        initialValue:
-                            status,
-
-                        decoration:
-                            const InputDecoration(
-                          labelText:
-                              'Status',
-
-                          prefixIcon:
-                              Icon(
-                            Icons.toggle_on,
-                          ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: status,
+                        decoration: const InputDecoration(
+                          labelText: 'Bus Status',
+                          prefixIcon: Icon(Icons.info_outline),
                         ),
-
                         items: const [
-
-                          DropdownMenuItem(
-                            value: 'Active',
-                            child:
-                                Text(
-                              'Active',
-                            ),
-                          ),
-
-                          DropdownMenuItem(
-                            value: 'Inactive',
-                            child:
-                                Text(
-                              'Inactive',
-                            ),
-                          ),
+                          DropdownMenuItem(value: 'Active', child: Text('Active')),
+                          DropdownMenuItem(value: 'Maintenance', child: Text('Maintenance')),
+                          DropdownMenuItem(value: 'Inactive', child: Text('Inactive')),
                         ],
-
-                        onChanged:
-                            isSaving
-                                ? null
-                                : (
-                                    value,
-                                  ) {
-
-                                    if (value ==
-                                        null) {
-                                      return;
-                                    }
-
-                                    setDialogState(
-                                      () {
-
-                                        status =
-                                            value;
-                                      },
-                                    );
-                                  },
+                        onChanged: (val) {
+                          if (val != null) {
+                            setDialogState(() {
+                              status = val;
+                            });
+                          }
+                        },
                       ),
                     ],
                   ),
                 ),
               ),
-
-              // ==================================================
-              // BUTTONS
-              // ==================================================
-
               actions: [
-
-                // CANCEL
                 TextButton(
-                  onPressed:
-                      isSaving
-                          ? null
-                          : () {
-
-                              Navigator.pop(
-                                dialogContext,
-                              );
-                            },
-
-                  child:
-                      const Text(
-                    'Cancel',
-                  ),
+                  onPressed: isSaving ? null : () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('Cancel'),
                 ),
-
-                // ADD / SAVE
                 ElevatedButton(
-                  onPressed:
-                      isSaving
-                          ? null
-                          : () async {
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          if (!formKey.currentState!.validate()) return;
+                          if (selectedRoute == null || selectedRoute!.trim().isEmpty) {
+                            ScaffoldMessenger.of(dialogContext).showSnackBar(
+                              const SnackBar(content: Text('Please select a route')),
+                            );
+                            return;
+                          }
 
-                              // ----------------------------------
-                              // VALIDATE
-                              // ----------------------------------
+                          setDialogState(() {
+                            isSaving = true;
+                          });
 
-                              if (!formKey
-                                  .currentState!
-                                  .validate()) {
-                                return;
-                              }
-
-                              if (selectedRoute ==
-                                      null ||
-                                  selectedRoute!
-                                      .trim()
-                                      .isEmpty) {
-
-                                ScaffoldMessenger
-                                    .of(
-                                  dialogContext,
-                                ).showSnackBar(
-                                  const SnackBar(
-                                    content:
-                                        Text(
-                                      'Please select a route',
-                                    ),
-                                  ),
-                                );
-
-                                return;
-                              }
-
-                              setDialogState(
-                                () {
-                                  isSaving = true;
-                                },
+                          try {
+                            Map<String, dynamic> result;
+                            if (existingBus == null) {
+                              result = await ApiService.addBus(
+                                busNumber: busNumberController.text.trim(),
+                                route: selectedRoute!,
+                                driverName: driverController.text.trim(),
+                                status: status,
                               );
+                            } else {
+                              final busId = existingBus['bus_id'];
+                              if (busId == null) throw Exception('Invalid bus ID');
+                              result = await ApiService.updateBus(
+                                busId: busId,
+                                busNumber: busNumberController.text.trim(),
+                                route: selectedRoute!,
+                                driverName: driverController.text.trim(),
+                                status: status,
+                              );
+                            }
 
-                              try {
+                            if (!dialogContext.mounted) return;
 
-                                Map<String, dynamic>
-                                    result;
-
-                                // --------------------------------
-                                // ADD
-                                // --------------------------------
-
-                                if (existingBus ==
-                                    null) {
-
-                                  result =
-                                      await ApiService
-                                          .addBus(
-                                    busNumber:
-                                        busNumberController
-                                            .text
-                                            .trim(),
-
-                                    route:
-                                        selectedRoute!,
-
-                                    driverName:
-                                        driverController
-                                            .text
-                                            .trim(),
-
-                                    status:
-                                        status,
-                                  );
-
-                                }
-
-                                // --------------------------------
-                                // UPDATE
-                                // --------------------------------
-
-                                else {
-
-                                  final busId =
-                                      existingBus[
-                                          'bus_id'];
-
-                                  if (busId ==
-                                      null) {
-
-                                    throw Exception(
-                                      'Invalid bus ID',
-                                    );
-                                  }
-
-                                  result =
-                                      await ApiService
-                                          .updateBus(
-                                    busId:
-                                        busId,
-
-                                    busNumber:
-                                        busNumberController
-                                            .text
-                                            .trim(),
-
-                                    route:
-                                        selectedRoute!,
-
-                                    driverName:
-                                        driverController
-                                            .text
-                                            .trim(),
-
-                                    status:
-                                        status,
-                                  );
-                                }
-
-                                if (!dialogContext
-                                    .mounted) {
-                                  return;
-                                }
-
-                                // --------------------------------
-                                // SUCCESS
-                                // --------------------------------
-
-                                if (result[
-                                        'success'] ==
-                                    true) {
-
-                                  Navigator.pop(
-                                    dialogContext,
-                                  );
-
-                                  if (!mounted) {
-                                    return;
-                                  }
-
-                                  ScaffoldMessenger
-                                      .of(
-                                    context,
-                                  ).showSnackBar(
-                                    SnackBar(
-                                      content:
-                                          Text(
-                                        result[
-                                                    'message']
-                                                ?.toString() ??
-                                            'Bus saved successfully',
-                                      ),
-
-                                      backgroundColor:
-                                          AppColors
-                                              .success,
-                                    ),
-                                  );
-
-                                  await _loadBuses();
-                                }
-
-                                // --------------------------------
-                                // FAILURE
-                                // --------------------------------
-
-                                else {
-
-                                  setDialogState(
-                                    () {
-                                      isSaving =
-                                          false;
-                                    },
-                                  );
-
-                                  ScaffoldMessenger
-                                      .of(
-                                    dialogContext,
-                                  ).showSnackBar(
-                                    SnackBar(
-                                      content:
-                                          Text(
-                                        result[
-                                                    'message']
-                                                ?.toString() ??
-                                            'Operation failed',
-                                      ),
-
-                                      backgroundColor:
-                                          AppColors
-                                              .danger,
-                                    ),
-                                  );
-                                }
-
-                              } catch (e) {
-
-                                if (!dialogContext
-                                    .mounted) {
-                                  return;
-                                }
-
-                                setDialogState(
-                                  () {
-                                    isSaving =
-                                        false;
-                                  },
-                                );
-
-                                ScaffoldMessenger
-                                    .of(
-                                  dialogContext,
-                                ).showSnackBar(
-                                  SnackBar(
-                                    content:
-                                        Text(
-                                      e.toString()
-                                          .replaceFirst(
-                                        'Exception: ',
-                                        '',
-                                      ),
-                                    ),
-
-                                    backgroundColor:
-                                        AppColors
-                                            .danger,
-                                  ),
-                                );
-                              }
-                            },
-
-                  child:
-                      isSaving
-
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-
-                              child:
-                                  CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color:
-                                    Colors.white,
+                            if (result['success'] == true) {
+                              Navigator.of(dialogContext).pop(true);
+                            } else {
+                              setDialogState(() {
+                                isSaving = false;
+                              });
+                              ScaffoldMessenger.of(dialogContext).showSnackBar(
+                                SnackBar(
+                                  content: Text(result['message']?.toString() ?? 'Operation failed'),
+                                  backgroundColor: AppColors.danger,
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            if (!dialogContext.mounted) return;
+                            setDialogState(() {
+                              isSaving = false;
+                            });
+                            ScaffoldMessenger.of(dialogContext).showSnackBar(
+                              SnackBar(
+                                content: Text(e.toString().replaceFirst('Exception: ', '')),
+                                backgroundColor: AppColors.danger,
                               ),
-                            )
-
-                          : Text(
-                              existingBus ==
-                                      null
-                                  ? 'Add'
-                                  : 'Save',
-                            ),
+                            );
+                          }
+                        },
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : Text(existingBus == null ? 'Add' : 'Save'),
                 ),
               ],
             );
@@ -919,6 +424,16 @@ class _ManageBusesScreenState
 
     busNumberController.dispose();
     driverController.dispose();
+
+    if (shouldRefresh == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(existingBus == null ? 'Bus added successfully' : 'Bus updated successfully'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+      await _loadBuses();
+    }
   }
 
   // ============================================================
