@@ -99,8 +99,9 @@ class _ParentChildAssignmentScreenState
     }).toList();
     final approvedParents = approvedParentsList.isNotEmpty ? approvedParentsList : parents;
 
-    await showDialog<void>(
+    final bool? shouldRefresh = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (dialogCtx) {
         bool isSaving = false;
 
@@ -171,7 +172,7 @@ class _ParentChildAssignmentScreenState
               ),
               actions: [
                 TextButton(
-                  onPressed: isSaving ? null : () => Navigator.pop(dialogCtx),
+                  onPressed: isSaving ? null : () => Navigator.of(dialogCtx).pop(false),
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton(
@@ -193,21 +194,10 @@ class _ParentChildAssignmentScreenState
                               className: classNameController.text.trim(),
                             );
 
-                            if (!dialogCtx.mounted || !mounted) return;
+                            if (!dialogCtx.mounted) return;
 
                             if (res['success'] == true) {
-                              Navigator.pop(dialogCtx);
-                              if (!mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    res['message']?.toString() ??
-                                        'Child linked successfully',
-                                  ),
-                                  backgroundColor: AppColors.success,
-                                ),
-                              );
-                              _loadData();
+                              Navigator.of(dialogCtx).pop(true);
                             } else {
                               setDialogState(() => isSaving = false);
                               ScaffoldMessenger.of(dialogCtx).showSnackBar(
@@ -253,6 +243,16 @@ class _ParentChildAssignmentScreenState
 
     childNameController.dispose();
     classNameController.dispose();
+
+    if (shouldRefresh == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Child linked successfully'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+      await _loadData();
+    }
   }
 
   // ============================================================
@@ -274,8 +274,9 @@ class _ParentChildAssignmentScreenState
             .where((s) => _toInt(s['route_id']) == selectedRouteId)
             .toList();
 
-    await showDialog<void>(
+    final bool? shouldRefresh = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (dialogCtx) {
         bool isSaving = false;
 
@@ -383,7 +384,7 @@ class _ParentChildAssignmentScreenState
               ),
               actions: [
                 TextButton(
-                  onPressed: isSaving ? null : () => Navigator.pop(dialogCtx),
+                  onPressed: isSaving ? null : () => Navigator.of(dialogCtx).pop(false),
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton(
@@ -406,21 +407,10 @@ class _ParentChildAssignmentScreenState
                               pickupStopId: selectedStopId!,
                             );
 
-                            if (!dialogCtx.mounted || !mounted) return;
+                            if (!dialogCtx.mounted) return;
 
                             if (res['success'] == true) {
-                              Navigator.pop(dialogCtx);
-                              if (!mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    res['message']?.toString() ??
-                                        'Transport assigned successfully',
-                                  ),
-                                  backgroundColor: AppColors.success,
-                                ),
-                              );
-                              _loadData();
+                              Navigator.of(dialogCtx).pop(true);
                             } else {
                               setDialogState(() => isSaving = false);
                               ScaffoldMessenger.of(dialogCtx).showSnackBar(
@@ -463,6 +453,16 @@ class _ParentChildAssignmentScreenState
         );
       },
     );
+
+    if (shouldRefresh == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Transport assigned successfully'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+      await _loadData();
+    }
   }
 
   @override
@@ -564,7 +564,7 @@ class _ParentChildAssignmentScreenState
                               borderRadius: BorderRadius.circular(16),
                               boxShadow: [
                                 BoxShadow(
-                                  color: AppColors.primary.withValues(alpha: 0.2),
+                                  color: AppColors.primary.withOpacityCompat(0.2),
                                   blurRadius: 10,
                                   offset: const Offset(0, 4),
                                 ),
@@ -654,8 +654,8 @@ class _ParentChildAssignmentScreenState
                                 borderRadius: BorderRadius.circular(16),
                                 side: BorderSide(
                                   color: isAssigned
-                                      ? AppColors.success.withValues(alpha: 0.3)
-                                      : Colors.grey.withValues(alpha: 0.2),
+                                      ? AppColors.success.withOpacityCompat(0.3)
+                                      : Colors.grey.withOpacityCompat(0.2),
                                   width: 1,
                                 ),
                               ),
@@ -728,8 +728,8 @@ class _ParentChildAssignmentScreenState
                                                 BorderRadius.circular(20),
                                             border: Border.all(
                                               color: isAssigned
-                                                  ? AppColors.success.withValues(alpha: 0.4)
-                                                  : AppColors.warning.withValues(alpha: 0.4),
+                                                  ? AppColors.success.withOpacityCompat(0.4)
+                                                  : AppColors.warning.withOpacityCompat(0.4),
                                             ),
                                           ),
                                           child: Row(
