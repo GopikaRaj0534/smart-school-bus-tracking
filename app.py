@@ -52,8 +52,9 @@ if not ssl_disabled:
 # ============================================================
 
 def get_db():
+    conn = None
     try:
-        return mysql.connector.connect(**DB_CONFIG)
+        conn = mysql.connector.connect(**DB_CONFIG)
     except mysql.connector.Error as e:
         if DB_CONFIG.get("host") in ("localhost", "127.0.0.1"):
             try:
@@ -64,10 +65,19 @@ def get_db():
                     "password": "",
                     "database": os.environ.get("DB_NAME", os.environ.get("MYSQL_DATABASE", "defaultdb"))
                 }
-                return mysql.connector.connect(**local_config)
+                conn = mysql.connector.connect(**local_config)
             except mysql.connector.Error:
                 pass
-        raise e
+        if not conn:
+            raise e
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))")
+        cursor.close()
+    except Exception:
+        pass
+    return conn
 
 
 _tables_ensured = False
@@ -915,7 +925,7 @@ def login():
                     "user": serialize_row(user)
                 }), 403
 
-            if database_status != "APPROVED":
+            if database_status not in ["APPROVED", "ACTIVE"]:
 
                 return jsonify({
                     "success": False,
@@ -928,10 +938,11 @@ def login():
                 """
                 SELECT bus_id, bus_number
                 FROM buses
-                WHERE LOWER(TRIM(driver_name))= LOWER(TRIM(%s))LIMIT 1
+                WHERE driver_id = %s OR LOWER(TRIM(driver_name)) = LOWER(TRIM(%s))
+                LIMIT 1
                 """,
-                (user["full_name"],)
-        )
+                (user["user_id"], user["full_name"])
+            )
 
             assigned_bus = cursor.fetchone()
 
@@ -965,7 +976,7 @@ def login():
                     "status": "REJECTED"
                 }), 403
 
-            if database_status != "APPROVED":
+            if database_status not in ["APPROVED", "ACTIVE"]:
 
                 return jsonify({
                     "success": False,
@@ -1067,13 +1078,13 @@ def get_parent_requests():
         cursor.execute(
             """
             SELECT
-                COALESCE(pr.request_id, u.user_id) AS request_id,
+                COALESCE(MIN(pr.request_id), u.user_id) AS request_id,
                 u.user_id,
                 u.full_name,
                 u.email,
                 u.phone,
-                COALESCE(pr.child_name, pc.child_name, 'Not provided') AS child_name,
-                COALESCE(pr.child_class, pc.class_name, 'Not provided') AS child_class,
+                COALESCE(MIN(pr.child_name), MIN(pc.child_name), 'Not provided') AS child_name,
+                COALESCE(MIN(pr.child_class), MIN(pc.class_name), 'Not provided') AS child_class,
                 u.status,
                 u.created_at
             FROM users u
@@ -1083,7 +1094,7 @@ def get_parent_requests():
                 ON u.user_id = pc.parent_id
             WHERE u.role = 'Parent'
               AND (UPPER(TRIM(u.status)) = 'PENDING' OR (pr.status IS NOT NULL AND UPPER(TRIM(pr.status)) = 'PENDING'))
-            GROUP BY u.user_id
+            GROUP BY u.user_id, u.full_name, u.email, u.phone, u.status, u.created_at
             ORDER BY u.created_at DESC
             """
         )
@@ -3689,12 +3700,13 @@ def get_parent_dashboard(parent_id):
                 "message": "Parent not found"
             }), 404
 
-        if str(parent["status"]).upper() != "APPROVED":
+        parent_status = str(parent.get("status") or "APPROVED").strip().upper()
+        if parent_status not in ["APPROVED", "ACTIVE"]:
 
             return jsonify({
                 "success": False,
                 "message": "Parent account is not approved",
-                "status": parent["status"]
+                "status": parent.get("status")
             }), 403
 
         # ----------------------------------------------------
@@ -3750,7 +3762,7 @@ def get_parent_dashboard(parent_id):
 
             WHERE pc.parent_id = %s
 
-            GROUP BY pc.child_id
+            GROUP BY pc.child_id, pc.child_name, pc.class_name, pc.bus_id, b.bus_number, u_driver.full_name, b.driver_name, u_driver.phone, b.status, pc.route_id, r.route_name, b.route, pc.pickup_stop_id, ps.stop_name, ps.stop_order, ps.latitude, ps.longitude, cba.absence_id, cba.status, sb.boarding_status, sb.boarding_time
             ORDER BY pc.child_id ASC
             """,
             (parent_id,)
@@ -3924,7 +3936,7 @@ def get_parent_children(parent_id):
                 ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
 
             WHERE pc.parent_id = %s
-            GROUP BY pc.child_id
+            GROUP BY pc.child_id, pc.child_name, pc.class_name, pc.bus_id, b.bus_number, u_driver.full_name, b.driver_name, u_driver.phone, pc.route_id, r.route_id, r.route_name, b.route, pc.pickup_stop_id, ps.stop_name, ps.latitude, ps.longitude, sb.boarding_status, sb.boarding_time
             ORDER BY pc.child_id ASC
             """,
             (parent_id,)
@@ -4256,7 +4268,7 @@ def get_driver_dashboard(driver_id):
                 LEFT JOIN student_boarding sb
                     ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
                 WHERE pc.bus_id = %s OR (pc.bus_id IS NULL AND LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s)))
-                GROUP BY pc.child_id
+                GROUP BY pc.child_id, pc.child_name, pc.class_name, pc.bus_id, b.bus_number, pc.route_id, r.route_name, pc.pickup_stop_id, ps.stop_name, ps.latitude, ps.longitude, sb.boarding_status, sb.boarding_time, u_parent.full_name, u_parent.phone, u_parent.email
                 ORDER BY pc.child_name ASC
                 """,
                 (bus["bus_id"], bus.get("route"))
@@ -5565,7 +5577,7 @@ def get_driver_active_itinerary(driver_id):
             LEFT JOIN child_bus_absence cba ON pc.child_id = cba.child_id AND cba.absence_date = CURDATE()
             LEFT JOIN student_boarding sb ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
             WHERE pc.bus_id = %s OR (pc.bus_id IS NULL AND LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s)))
-            GROUP BY pc.child_id
+            GROUP BY pc.child_id, pc.child_name, pc.class_name, pc.parent_id, u.full_name, u.phone, pc.pickup_stop_id, ps.stop_name, ps.latitude, ps.longitude, cba.absence_id, cba.status, sb.boarding_status
             ORDER BY pc.child_name ASC
             """,
             (bus["bus_id"], bus.get("route"))
@@ -5679,7 +5691,12 @@ def get_driver_bus_details(driver_id):
         )
         bus = cursor.fetchone()
         if not bus:
-            return jsonify({"success": False, "message": "No bus assigned to driver"}), 444
+            return jsonify({
+                "success": True,
+                "bus": None,
+                "stops": [],
+                "message": "No bus assigned to driver"
+            }), 200
             
         # Get route stops if route exists
         stops = []
@@ -5754,7 +5771,7 @@ def get_driver_assigned_students(driver_id):
             LEFT JOIN child_bus_absence cba ON pc.child_id = cba.child_id AND cba.absence_date = CURDATE()
             LEFT JOIN student_boarding sb ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
             WHERE pc.bus_id = %s OR (pc.bus_id IS NULL AND LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s)))
-            GROUP BY pc.child_id
+            GROUP BY pc.child_id, pc.child_name, pc.class_name, pc.parent_id, u.full_name, u.phone, u.email, pc.pickup_stop_id, ps.stop_name, ps.latitude, ps.longitude, cba.absence_id, cba.status, sb.boarding_status, sb.boarding_time
             ORDER BY pc.child_name ASC
             """,
             (bus["bus_id"], bus.get("route"))
