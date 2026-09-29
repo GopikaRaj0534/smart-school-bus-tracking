@@ -13,8 +13,18 @@ class ApiService {
   static const Duration _timeoutDuration = Duration(seconds: 15);
 
   static String? _cachedBaseUrl;
+  static String? _manualBaseUrl;
+
+  /// Configure production API URL dynamically (e.g. `ApiService.overrideBaseUrl = 'https://your-service.onrender.com'`)
+  static set overrideBaseUrl(String? url) {
+    _manualBaseUrl = url;
+  }
 
   static String get baseUrl {
+    if (_manualBaseUrl != null && _manualBaseUrl!.trim().isNotEmpty) {
+      return _manualBaseUrl!.trim();
+    }
+
     const envBaseUrl = String.fromEnvironment(
       'ROUTESAFE_API_BASE_URL',
       defaultValue: '',

@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: smart-school-bus-tracking-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
+    healthCheckPath: /
+    envVars:
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "3306"
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        value: "routesafe_db"
+      - key: PYTHON_VERSION
+        value: "3.11.0"

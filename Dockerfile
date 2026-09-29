@@ -12,6 +12,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 COPY init.sql .
 
-EXPOSE 5000
-
-CMD ["python", "app.py"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-5000} app:app"]
