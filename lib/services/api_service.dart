@@ -12,10 +12,13 @@ class ApiService {
 
   static const Duration _timeoutDuration = Duration(seconds: 15);
 
+  static const String defaultProductionUrl =
+      'https://smart-school-bus-tracking.onrender.com';
+
   static String? _cachedBaseUrl;
   static String? _manualBaseUrl;
 
-  /// Configure production API URL dynamically (e.g. `ApiService.overrideBaseUrl = 'https://your-service.onrender.com'`)
+  /// Configure production API URL dynamically (e.g. `ApiService.overrideBaseUrl = 'https://smart-school-bus-tracking.onrender.com'`)
   static set overrideBaseUrl(String? url) {
     _manualBaseUrl = url;
   }
@@ -38,8 +41,8 @@ class ApiService {
       return _cachedBaseUrl!;
     }
 
-    // Default API base URL for local development (with automatic 10.0.2.2 fallback on Android emulators)
-    return 'http://127.0.0.1:5000';
+    // Default API base URL for deployed Render production backend HTTPS
+    return defaultProductionUrl;
   }
 
   // ============================================================
@@ -839,7 +842,6 @@ class ApiService {
     } on SocketException catch (e) {
       throw Exception(
         'Cannot connect to RouteSafe server ($baseUrl). '
-        'Make sure Flask is running on port 5000. '
         'Error: ${e.message}',
       );
     } on http.ClientException catch (e) {
@@ -890,7 +892,6 @@ class ApiService {
     } on SocketException catch (e) {
       throw Exception(
         'Cannot connect to RouteSafe server ($baseUrl). '
-        'Make sure Flask is running on port 5000. '
         'Error: ${e.message}',
       );
     } on http.ClientException catch (e) {
@@ -943,7 +944,6 @@ class ApiService {
     } on SocketException catch (e) {
       throw Exception(
         'Cannot connect to RouteSafe server ($baseUrl). '
-        'Make sure Flask is running on port 5000. '
         'Error: ${e.message}',
       );
     } on http.ClientException catch (e) {
@@ -988,7 +988,6 @@ class ApiService {
     } on SocketException catch (e) {
       throw Exception(
         'Cannot connect to RouteSafe server ($baseUrl). '
-        'Make sure Flask is running on port 5000. '
         'Error: ${e.message}',
       );
     } on http.ClientException catch (e) {
