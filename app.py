@@ -27,34 +27,42 @@ CORS(app)
 
 
 # ============================================================
+# ============================================================
 # DATABASE CONFIGURATION
 # ============================================================
 
 DB_CONFIG = {
-    "host": os.environ.get("DB_HOST", "localhost"),
-    "port": int(os.environ.get("DB_PORT", "3306")),
-    "user": os.environ.get("MYSQL_USER", os.environ.get("DB_USER", "root")),
-    "password": os.environ.get("MYSQL_PASSWORD", os.environ.get("DB_PASSWORD", "")),
-    "database": os.environ.get("MYSQL_DATABASE", os.environ.get("DB_NAME", "routesafe_db"))
+    "host": os.environ.get("DB_HOST", os.environ.get("MYSQL_HOST", "localhost")),
+    "port": int(os.environ.get("DB_PORT", os.environ.get("MYSQL_PORT", "3306"))),
+    "user": os.environ.get("DB_USER", os.environ.get("MYSQL_USER", "root")),
+    "password": os.environ.get("DB_PASSWORD", os.environ.get("MYSQL_PASSWORD", "")),
+    "database": os.environ.get("DB_NAME", os.environ.get("MYSQL_DATABASE", "defaultdb"))
 }
+
+# Support optional SSL CA certificate / SSL configuration if required by cloud provider (e.g. Aiven)
+ssl_disabled = os.environ.get("DB_SSL_DISABLED", "").lower() in ("true", "1", "yes")
+if not ssl_disabled:
+    ssl_ca = os.environ.get("DB_SSL_CA")
+    if ssl_ca:
+        DB_CONFIG["ssl_ca"] = ssl_ca
 
 
 # ============================================================
-# DATABASE CONNECTION
+# DATABASE CONNECTION & AUTOMATIC TABLE INITIALIZATION
 # ============================================================
 
 def get_db():
     try:
         return mysql.connector.connect(**DB_CONFIG)
     except mysql.connector.Error as e:
-        if DB_CONFIG.get("host") not in ("localhost", "127.0.0.1"):
+        if DB_CONFIG.get("host") in ("localhost", "127.0.0.1"):
             try:
                 local_config = {
                     "host": "localhost",
                     "port": 3306,
                     "user": "root",
                     "password": "",
-                    "database": os.environ.get("MYSQL_DATABASE", "routesafe_db")
+                    "database": os.environ.get("DB_NAME", os.environ.get("MYSQL_DATABASE", "defaultdb"))
                 }
                 return mysql.connector.connect(**local_config)
             except mysql.connector.Error:
@@ -62,31 +70,256 @@ def get_db():
         raise e
 
 
-# ============================================================
-# SCHOOL SETTINGS HELPER & TABLE INIT
-# ============================================================
+_tables_ensured = False
 
-def ensure_school_table():
+def ensure_all_tables():
+    global _tables_ensured
+    if _tables_ensured:
+        return
     conn = None
     cursor = None
     try:
         conn = get_db()
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()
+
+        # 1. users
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS school_settings (
-                id INT PRIMARY KEY AUTO_INCREMENT,
-                school_name VARCHAR(255) NOT NULL,
-                address TEXT NOT NULL,
-                latitude DOUBLE NOT NULL,
-                longitude DOUBLE NOT NULL,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            )
+            CREATE TABLE IF NOT EXISTS `users` (
+              `user_id` int(11) NOT NULL AUTO_INCREMENT,
+              `full_name` varchar(100) NOT NULL,
+              `email` varchar(100) NOT NULL,
+              `phone` varchar(15) DEFAULT NULL,
+              `license_number` varchar(50) DEFAULT NULL,
+              `password` varchar(255) NOT NULL,
+              `role` enum('Admin','Driver','Parent') NOT NULL,
+              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+              `status` varchar(20) NOT NULL DEFAULT 'APPROVED',
+              `rejection_reason` text DEFAULT NULL,
+              `account_status` varchar(20) NOT NULL DEFAULT 'APPROVED',
+              PRIMARY KEY (`user_id`),
+              UNIQUE KEY `email` (`email`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
         """)
-        conn.commit()
+
+        # Default Admin User (admin@gmail.com / admin123)
+        cursor.execute("""
+            INSERT IGNORE INTO `users` (`user_id`, `full_name`, `email`, `phone`, `license_number`, `password`, `role`, `created_at`, `status`, `rejection_reason`, `account_status`)
+            VALUES (4, 'Admin', 'admin@gmail.com', '7890766754', NULL,
+                    'scrypt:32768:8:1$Iw2qTbtdoBGRiV0T$f3d8d89a74e9e4ef3c349e91170639dc4fcb7ad2ffdf2506e66a716df7171423ed63bad08c4eace3e152001a1fb5c9c3d966dda68f59f7d1f2954431d4f83673',
+                    'Admin', NOW(), 'APPROVED', NULL, 'APPROVED');
+        """)
+
+        # 2. routes
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS `routes` (
+              `route_id` int(11) NOT NULL AUTO_INCREMENT,
+              `route_name` varchar(100) NOT NULL,
+              PRIMARY KEY (`route_id`),
+              UNIQUE KEY `route_name` (`route_name`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
+
+        # 3. pickup_stops
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS `pickup_stops` (
+              `stop_id` int(11) NOT NULL AUTO_INCREMENT,
+              `route_id` int(11) NOT NULL,
+              `stop_name` varchar(100) NOT NULL,
+              `stop_order` int(11) DEFAULT 1,
+              `latitude` decimal(10,7) DEFAULT NULL,
+              `longitude` decimal(10,7) DEFAULT NULL,
+              PRIMARY KEY (`stop_id`),
+              KEY `route_id` (`route_id`),
+              CONSTRAINT `pickup_stops_ibfk_1` FOREIGN KEY (`route_id`) REFERENCES `routes` (`route_id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
+
+        # 4. buses
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS `buses` (
+              `bus_id` int(11) NOT NULL AUTO_INCREMENT,
+              `bus_number` varchar(50) NOT NULL,
+              `registration_number` varchar(50) DEFAULT NULL,
+              `route` varchar(150) NOT NULL,
+              `driver_name` varchar(100) DEFAULT NULL,
+              `status` varchar(20) DEFAULT 'Active',
+              `start_point` varchar(100) DEFAULT NULL,
+              `destination` varchar(100) DEFAULT NULL,
+              `driver_id` int(11) DEFAULT NULL,
+              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+              PRIMARY KEY (`bus_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
+
+        # 5. parent_children
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS `parent_children` (
+              `child_id` int(11) NOT NULL AUTO_INCREMENT,
+              `parent_id` int(11) NOT NULL,
+              `child_name` varchar(100) NOT NULL,
+              `bus_id` int(11) DEFAULT NULL,
+              `route_id` int(11) DEFAULT NULL,
+              `pickup_stop_id` int(11) DEFAULT NULL,
+              `class_name` varchar(50) DEFAULT NULL,
+              PRIMARY KEY (`child_id`),
+              KEY `parent_id` (`parent_id`),
+              KEY `fk_child_bus` (`bus_id`),
+              KEY `fk_child_route` (`route_id`),
+              CONSTRAINT `fk_child_bus` FOREIGN KEY (`bus_id`) REFERENCES `buses` (`bus_id`) ON DELETE SET NULL,
+              CONSTRAINT `fk_child_route` FOREIGN KEY (`route_id`) REFERENCES `routes` (`route_id`) ON DELETE SET NULL,
+              CONSTRAINT `parent_children_ibfk_1` FOREIGN KEY (`parent_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
+
+        # 6. student_boarding
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS `student_boarding` (
+              `attendance_id` int(11) NOT NULL AUTO_INCREMENT,
+              `child_id` int(11) NOT NULL,
+              `bus_id` int(11) NOT NULL,
+              `driver_id` int(11) NOT NULL,
+              `trip_id` int(11) DEFAULT NULL,
+              `attendance_date` date NOT NULL,
+              `boarding_status` enum('Not Boarded','Boarded','Dropped Off') DEFAULT 'Not Boarded',
+              `boarding_time` time DEFAULT NULL,
+              `drop_off_status` enum('Pending','Dropped Off') DEFAULT 'Pending',
+              `drop_off_time` time DEFAULT NULL,
+              `stop_id` int(11) DEFAULT NULL,
+              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+              PRIMARY KEY (`attendance_id`),
+              UNIQUE KEY `unique_daily_child` (`child_id`,`attendance_date`,`bus_id`),
+              KEY `bus_id` (`bus_id`),
+              KEY `driver_id` (`driver_id`),
+              CONSTRAINT `student_boarding_ibfk_1` FOREIGN KEY (`child_id`) REFERENCES `parent_children` (`child_id`) ON DELETE CASCADE,
+              CONSTRAINT `student_boarding_ibfk_2` FOREIGN KEY (`bus_id`) REFERENCES `buses` (`bus_id`) ON DELETE CASCADE,
+              CONSTRAINT `student_boarding_ibfk_3` FOREIGN KEY (`driver_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
+
+        # 7. driver_trips
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS `driver_trips` (
+              `trip_id` int(11) NOT NULL AUTO_INCREMENT,
+              `driver_id` int(11) NOT NULL,
+              `bus_id` int(11) DEFAULT NULL,
+              `start_time` datetime DEFAULT NULL,
+              `end_time` datetime DEFAULT NULL,
+              `status` varchar(20) NOT NULL DEFAULT 'Not Started',
+              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+              PRIMARY KEY (`trip_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
+
+        # 8. driver_locations
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS `driver_locations` (
+              `location_id` int(11) NOT NULL AUTO_INCREMENT,
+              `driver_id` int(11) NOT NULL,
+              `latitude` decimal(10,7) NOT NULL,
+              `longitude` decimal(10,7) NOT NULL,
+              `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+              PRIMARY KEY (`location_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
+
+        # 9. driver_emergencies
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS `driver_emergencies` (
+              `emergency_id` int(11) NOT NULL AUTO_INCREMENT,
+              `driver_id` int(11) NOT NULL,
+              `emergency_type` varchar(50) DEFAULT 'Other',
+              `message` text NOT NULL,
+              `latitude` double DEFAULT NULL,
+              `longitude` double DEFAULT NULL,
+              `bus_id` int(11) DEFAULT NULL,
+              `status` varchar(20) NOT NULL DEFAULT 'Pending',
+              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+              PRIMARY KEY (`emergency_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
+
+        # 10. parent_registration_requests
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS `parent_registration_requests` (
+              `request_id` int(11) NOT NULL AUTO_INCREMENT,
+              `full_name` varchar(100) NOT NULL,
+              `email` varchar(150) NOT NULL,
+              `phone` varchar(20) DEFAULT NULL,
+              `password` varchar(255) NOT NULL,
+              `child_name` varchar(100) NOT NULL,
+              `child_class` varchar(50) DEFAULT NULL,
+              `status` enum('PENDING','APPROVED','REJECTED') DEFAULT 'PENDING',
+              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+              PRIMARY KEY (`request_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
+
+        # 11. driver_phone_otp
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS `driver_phone_otp` (
+              `otp_id` int(11) NOT NULL AUTO_INCREMENT,
+              `driver_id` int(11) NOT NULL,
+              `new_phone` varchar(20) NOT NULL,
+              `otp_hash` varchar(255) NOT NULL,
+              `expires_at` datetime NOT NULL,
+              `attempts` int(11) DEFAULT 0,
+              `verified` tinyint(1) DEFAULT 0,
+              `created_at` datetime DEFAULT current_timestamp(),
+              PRIMARY KEY (`otp_id`),
+              KEY `driver_id` (`driver_id`),
+              CONSTRAINT `driver_phone_otp_ibfk_1` FOREIGN KEY (`driver_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
+
+        # 12. assignment_logs
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS `assignment_logs` (
+              `log_id` int(11) NOT NULL AUTO_INCREMENT,
+              `entity_type` varchar(50) NOT NULL,
+              `entity_id` int(11) DEFAULT NULL,
+              `action` varchar(50) NOT NULL,
+              `details` text DEFAULT NULL,
+              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+              PRIMARY KEY (`log_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
+
+        # 13. child_bus_absence
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS `child_bus_absence` (
+              `absence_id` int(11) NOT NULL AUTO_INCREMENT,
+              `child_id` int(11) NOT NULL,
+              `parent_id` int(11) NOT NULL,
+              `route_id` int(11) DEFAULT NULL,
+              `stop_id` int(11) DEFAULT NULL,
+              `absence_date` date NOT NULL,
+              `status` varchar(50) NOT NULL DEFAULT 'Not Riding Today',
+              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+              `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+              PRIMARY KEY (`absence_id`),
+              UNIQUE KEY `unique_child_daily_absence` (`child_id`,`absence_date`),
+              KEY `fk_absence_child` (`child_id`),
+              KEY `fk_absence_parent` (`parent_id`),
+              CONSTRAINT `fk_absence_child` FOREIGN KEY (`child_id`) REFERENCES `parent_children` (`child_id`) ON DELETE CASCADE,
+              CONSTRAINT `fk_absence_parent` FOREIGN KEY (`parent_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
+
+        # 14. school_settings
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS `school_settings` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `school_name` varchar(255) NOT NULL,
+              `address` text NOT NULL,
+              `latitude` double NOT NULL,
+              `longitude` double NOT NULL,
+              `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+              PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
 
         cursor.execute("SELECT id FROM school_settings LIMIT 1")
-        existing = cursor.fetchone()
-        if not existing:
+        if not cursor.fetchone():
             cursor.execute("""
                 INSERT INTO school_settings (id, school_name, address, latitude, longitude)
                 VALUES (1, %s, %s, %s, %s)
@@ -96,42 +329,20 @@ def ensure_school_table():
                 9.50921,
                 76.55183
             ))
-            conn.commit()
+
+        conn.commit()
+        _tables_ensured = True
     except Exception as e:
-        print(f"School table init note: {e}")
+        print(f"Table auto-initialization note: {e}")
     finally:
         if cursor: cursor.close()
         if conn: conn.close()
 
+def ensure_school_table():
+    ensure_all_tables()
 
 def ensure_absence_table():
-    conn = None
-    cursor = None
-    try:
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS child_bus_absence (
-                absence_id INT AUTO_INCREMENT PRIMARY KEY,
-                child_id INT NOT NULL,
-                parent_id INT NOT NULL,
-                route_id INT DEFAULT NULL,
-                stop_id INT DEFAULT NULL,
-                absence_date DATE NOT NULL,
-                status VARCHAR(50) NOT NULL DEFAULT 'Not Riding Today',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                UNIQUE KEY unique_child_daily_absence (child_id, absence_date),
-                CONSTRAINT fk_absence_child FOREIGN KEY (child_id) REFERENCES parent_children (child_id) ON DELETE CASCADE,
-                CONSTRAINT fk_absence_parent FOREIGN KEY (parent_id) REFERENCES users (user_id) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-        conn.commit()
-    except Exception as e:
-        print(f"Absence table init note: {e}")
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
+    ensure_all_tables()
 
 
 def get_current_school_settings():
@@ -203,6 +414,11 @@ def normalize_role(role):
     role = str(role or "").strip()
 
     return role_map.get(role.lower(), role)
+
+
+@app.before_request
+def auto_init_tables():
+    ensure_all_tables()
 
 
 # ============================================================
