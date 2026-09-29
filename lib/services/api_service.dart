@@ -1089,6 +1089,49 @@ class ApiService {
   }
 
   // ============================================================
+  // PARENT ABSENCE & DYNAMIC ITINERARY
+  // ============================================================
+
+  static Future<Map<String, dynamic>> markChildAbsent({
+    required int parentId,
+    required int childId,
+    String? absenceDate,
+  }) async {
+    return _post(
+      '/parent/$parentId/child/$childId/absence',
+      {
+        if (absenceDate != null && absenceDate.isNotEmpty)
+          'absence_date': absenceDate,
+      },
+    );
+  }
+
+  static Future<Map<String, dynamic>> cancelChildAbsence({
+    required int parentId,
+    required int childId,
+    String? absenceDate,
+  }) async {
+    return _post(
+      '/parent/$parentId/child/$childId/absence/cancel',
+      {
+        if (absenceDate != null && absenceDate.isNotEmpty)
+          'absence_date': absenceDate,
+      },
+    );
+  }
+
+  static Future<Map<String, dynamic>> getChildAbsenceStatus({
+    required int parentId,
+    required int childId,
+  }) async {
+    return _get('/parent/$parentId/child/$childId/absence');
+  }
+
+  static Future<Map<String, dynamic>> getDriverItinerary(int driverId) async {
+    return _get('/driver/$driverId/itinerary');
+  }
+
+  // ============================================================
   // RESPONSE DECODER
   // ============================================================
 

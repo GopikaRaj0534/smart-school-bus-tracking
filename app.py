@@ -104,6 +104,36 @@ def ensure_school_table():
         if conn: conn.close()
 
 
+def ensure_absence_table():
+    conn = None
+    cursor = None
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS child_bus_absence (
+                absence_id INT AUTO_INCREMENT PRIMARY KEY,
+                child_id INT NOT NULL,
+                parent_id INT NOT NULL,
+                route_id INT DEFAULT NULL,
+                stop_id INT DEFAULT NULL,
+                absence_date DATE NOT NULL,
+                status VARCHAR(50) NOT NULL DEFAULT 'Not Riding Today',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY unique_child_daily_absence (child_id, absence_date),
+                CONSTRAINT fk_absence_child FOREIGN KEY (child_id) REFERENCES parent_children (child_id) ON DELETE CASCADE,
+                CONSTRAINT fk_absence_parent FOREIGN KEY (parent_id) REFERENCES users (user_id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+        """)
+        conn.commit()
+    except Exception as e:
+        print(f"Absence table init note: {e}")
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
+
 def get_current_school_settings():
     ensure_school_table()
     conn = None
@@ -3417,7 +3447,8 @@ def get_parent_dashboard(parent_id):
                 ps.latitude,
                 ps.longitude,
 
-                COALESCE(sb.boarding_status, 'Not Boarded') AS boarding_status,
+                cba.absence_id IS NOT NULL AND cba.status = 'Not Riding Today' AS is_absent,
+                COALESCE(sb.boarding_status, CASE WHEN cba.absence_id IS NOT NULL AND cba.status = 'Not Riding Today' THEN 'SKIP' ELSE 'Not Boarded' END) AS boarding_status,
                 sb.boarding_time
 
             FROM parent_children pc
@@ -3434,6 +3465,9 @@ def get_parent_dashboard(parent_id):
 
             LEFT JOIN pickup_stops ps
                 ON pc.pickup_stop_id = ps.stop_id
+
+            LEFT JOIN child_bus_absence cba
+                ON pc.child_id = cba.child_id AND cba.absence_date = CURDATE()
 
             LEFT JOIN student_boarding sb
                 ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
@@ -3454,6 +3488,7 @@ def get_parent_dashboard(parent_id):
 
             trip_status = "Not Started"
             eta = "ETA: Not available"
+            active_trip = None
 
             if bus_id:
                 # Check for active trip for this bus
@@ -3520,6 +3555,10 @@ def get_parent_dashboard(parent_id):
                 trip_status = "Not Started"
                 eta = "ETA: Not available"
 
+            is_absent = bool(child_dict.get("is_absent"))
+            child_dict["is_absent"] = is_absent
+            child_dict["bus_today_status"] = "NOT RIDING TODAY" if is_absent else "RIDING TODAY"
+            child_dict["trip_started"] = bool(active_trip)
             child_dict["trip_status"] = trip_status
             child_dict["eta"] = eta
             processed_children.append(child_dict)
@@ -5031,6 +5070,263 @@ def verify_driver_phone_change(driver_id):
 
 
 
+
+# ============================================================
+# PARENT ABSENCE & DYNAMIC ITINERARY ENDPOINTS
+# ============================================================
+
+@app.route("/parent/<int:parent_id>/child/<int:child_id>/absence", methods=["POST"])
+def mark_child_absent(parent_id, child_id):
+    ensure_absence_table()
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json(silent=True) or {}
+        absence_date = data.get("absence_date") or datetime.now().strftime("%Y-%m-%d")
+
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("SELECT user_id, status FROM users WHERE user_id = %s AND role = 'Parent'", (parent_id,))
+        parent = cursor.fetchone()
+        if not parent or str(parent.get("status")).upper() != "APPROVED":
+            return jsonify({"success": False, "message": "Unauthorized or unapproved parent account"}), 403
+
+        cursor.execute(
+            "SELECT pc.child_id, pc.child_name, pc.bus_id, pc.route_id, pc.pickup_stop_id FROM parent_children pc WHERE pc.child_id = %s AND pc.parent_id = %s",
+            (child_id, parent_id)
+        )
+        child = cursor.fetchone()
+        if not child:
+            return jsonify({"success": False, "message": "Child not found for this parent"}), 404
+
+        if child.get("bus_id"):
+            cursor.execute(
+                """
+                SELECT dt.trip_id
+                FROM driver_trips dt
+                WHERE dt.bus_id = %s AND dt.status = 'Active' AND DATE(dt.start_time) = %s
+                LIMIT 1
+                """,
+                (child["bus_id"], absence_date)
+            )
+            if cursor.fetchone():
+                return jsonify({
+                    "success": False,
+                    "message": "The trip has already started. Today's absence can no longer be changed."
+                }), 400
+
+        cursor.execute(
+            """
+            INSERT INTO child_bus_absence (child_id, parent_id, route_id, stop_id, absence_date, status)
+            VALUES (%s, %s, %s, %s, %s, 'Not Riding Today')
+            ON DUPLICATE KEY UPDATE status = 'Not Riding Today', updated_at = CURRENT_TIMESTAMP
+            """,
+            (child_id, parent_id, child.get("route_id"), child.get("pickup_stop_id"), absence_date)
+        )
+        conn.commit()
+
+        return jsonify({
+            "success": True,
+            "message": f"{child['child_name']} marked as Not Riding Today",
+            "is_absent": True,
+            "status": "Not Riding Today"
+        }), 200
+
+    except mysql.connector.Error as e:
+        return jsonify({"success": False, "message": f"Database error: {e}"}), 500
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
+
+@app.route("/parent/<int:parent_id>/child/<int:child_id>/absence/cancel", methods=["POST"])
+@app.route("/parent/<int:parent_id>/child/<int:child_id>/absence", methods=["DELETE"])
+def cancel_child_absence(parent_id, child_id):
+    ensure_absence_table()
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json(silent=True) or {}
+        absence_date = data.get("absence_date") or datetime.now().strftime("%Y-%m-%d")
+
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute(
+            "SELECT pc.child_id, pc.child_name, pc.bus_id FROM parent_children pc WHERE pc.child_id = %s AND pc.parent_id = %s",
+            (child_id, parent_id)
+        )
+        child = cursor.fetchone()
+        if not child:
+            return jsonify({"success": False, "message": "Child not found for this parent"}), 404
+
+        if child.get("bus_id"):
+            cursor.execute(
+                "SELECT dt.trip_id FROM driver_trips dt WHERE dt.bus_id = %s AND dt.status = 'Active' AND DATE(dt.start_time) = %s LIMIT 1",
+                (child["bus_id"], absence_date)
+            )
+            if cursor.fetchone():
+                return jsonify({
+                    "success": False,
+                    "message": "The trip has already started. Today's absence can no longer be changed."
+                }), 400
+
+        cursor.execute("DELETE FROM child_bus_absence WHERE child_id = %s AND absence_date = %s", (child_id, absence_date))
+        conn.commit()
+
+        return jsonify({
+            "success": True,
+            "message": f"Absence for {child['child_name']} cancelled successfully",
+            "is_absent": False,
+            "status": "Riding Today"
+        }), 200
+
+    except mysql.connector.Error as e:
+        return jsonify({"success": False, "message": f"Database error: {e}"}), 500
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
+
+@app.route("/parent/<int:parent_id>/child/<int:child_id>/absence", methods=["GET"])
+def get_child_absence_status(parent_id, child_id):
+    ensure_absence_table()
+    conn = None
+    cursor = None
+    try:
+        absence_date = request.args.get("date") or datetime.now().strftime("%Y-%m-%d")
+
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("SELECT pc.child_id, pc.child_name, pc.bus_id FROM parent_children pc WHERE pc.child_id = %s AND pc.parent_id = %s", (child_id, parent_id))
+        child = cursor.fetchone()
+        if not child:
+            return jsonify({"success": False, "message": "Child not found"}), 404
+
+        cursor.execute("SELECT * FROM child_bus_absence WHERE child_id = %s AND absence_date = %s", (child_id, absence_date))
+        absence = cursor.fetchone()
+
+        trip_started = False
+        if child.get("bus_id"):
+            cursor.execute("SELECT trip_id FROM driver_trips WHERE bus_id = %s AND status = 'Active' AND DATE(start_time) = %s LIMIT 1", (child["bus_id"], absence_date))
+            if cursor.fetchone():
+                trip_started = True
+
+        is_absent = bool(absence and absence.get("status") == "Not Riding Today")
+
+        return jsonify({
+            "success": True,
+            "is_absent": is_absent,
+            "status": "Not Riding Today" if is_absent else "Riding Today",
+            "trip_started": trip_started,
+            "absence": serialize_row(absence) if absence else None
+        }), 200
+
+    except mysql.connector.Error as e:
+        return jsonify({"success": False, "message": f"Database error: {e}"}), 500
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
+
+@app.route("/driver/<int:driver_id>/itinerary", methods=["GET"])
+def get_driver_active_itinerary(driver_id):
+    ensure_absence_table()
+    conn = None
+    cursor = None
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("SELECT full_name FROM users WHERE user_id = %s AND role = 'Driver'", (driver_id,))
+        driver = cursor.fetchone()
+        if not driver:
+            return jsonify({"success": False, "message": "Driver not found"}), 404
+
+        cursor.execute(
+            "SELECT bus_id, bus_number, route, registration_number, start_point, destination FROM buses WHERE driver_id = %s OR LOWER(TRIM(driver_name)) = LOWER(TRIM(%s)) LIMIT 1",
+            (driver_id, driver["full_name"])
+        )
+        bus = cursor.fetchone()
+        if not bus:
+            return jsonify({"success": True, "bus": None, "all_stops": [], "active_stops": [], "skipped_stops": [], "students": []}), 200
+
+        stops = []
+        if bus.get("route"):
+            cursor.execute(
+                """
+                SELECT ps.stop_id, ps.stop_name, ps.stop_order, ps.latitude, ps.longitude
+                FROM pickup_stops ps
+                JOIN routes r ON ps.route_id = r.route_id
+                WHERE LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s))
+                ORDER BY ps.stop_order ASC
+                """,
+                (bus["route"],)
+            )
+            stops = cursor.fetchall() or []
+
+        cursor.execute(
+            """
+            SELECT
+                pc.child_id,
+                pc.child_name,
+                pc.class_name,
+                pc.parent_id,
+                u.full_name AS parent_name,
+                u.phone AS parent_phone,
+                pc.pickup_stop_id,
+                ps.stop_name,
+                ps.latitude AS stop_latitude,
+                ps.longitude AS stop_longitude,
+                cba.absence_id IS NOT NULL AND cba.status = 'Not Riding Today' AS is_absent,
+                COALESCE(sb.boarding_status, CASE WHEN cba.absence_id IS NOT NULL AND cba.status = 'Not Riding Today' THEN 'SKIP' ELSE 'Not Boarded' END) AS boarding_status
+            FROM parent_children pc
+            LEFT JOIN users u ON pc.parent_id = u.user_id
+            LEFT JOIN pickup_stops ps ON pc.pickup_stop_id = ps.stop_id
+            LEFT JOIN routes r ON pc.route_id = r.route_id
+            LEFT JOIN child_bus_absence cba ON pc.child_id = cba.child_id AND cba.absence_date = CURDATE()
+            LEFT JOIN student_boarding sb ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
+            WHERE pc.bus_id = %s OR (pc.bus_id IS NULL AND LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s)))
+            GROUP BY pc.child_id
+            ORDER BY pc.child_name ASC
+            """,
+            (bus["bus_id"], bus.get("route"))
+        )
+        students = cursor.fetchall() or []
+
+        active_stops = []
+        skipped_stops = []
+
+        for stop in stops:
+            sid = stop["stop_id"]
+            stop_students = [s for s in students if s.get("pickup_stop_id") == sid]
+            stop_dict = serialize_row(stop)
+            if stop_students and all(s.get("is_absent") for s in stop_students):
+                stop_dict["is_skipped"] = True
+                stop_dict["skip_reason"] = "Child is not riding today"
+                skipped_stops.append(stop_dict)
+            else:
+                stop_dict["is_skipped"] = False
+                active_stops.append(stop_dict)
+
+        return jsonify({
+            "success": True,
+            "bus": serialize_row(bus),
+            "all_stops": [serialize_row(s) for s in stops],
+            "active_stops": active_stops,
+            "skipped_stops": skipped_stops,
+            "students": [serialize_row(s) for s in students]
+        }), 200
+
+    except mysql.connector.Error as e:
+        return jsonify({"success": False, "message": f"Database error: {e}"}), 500
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
+
 # ============================================================
 # DRIVER MODULE EXTENSION ENDPOINTS
 # ============================================================
@@ -5172,12 +5468,14 @@ def get_driver_assigned_students(driver_id):
                 ps.stop_name,
                 ps.latitude AS stop_latitude,
                 ps.longitude AS stop_longitude,
-                COALESCE(sb.boarding_status, 'Not Boarded') AS boarding_status,
+                cba.absence_id IS NOT NULL AND cba.status = 'Not Riding Today' AS is_absent,
+                COALESCE(sb.boarding_status, CASE WHEN cba.absence_id IS NOT NULL AND cba.status = 'Not Riding Today' THEN 'SKIP' ELSE 'Not Boarded' END) AS boarding_status,
                 sb.boarding_time
             FROM parent_children pc
             LEFT JOIN users u ON pc.parent_id = u.user_id
             LEFT JOIN pickup_stops ps ON pc.pickup_stop_id = ps.stop_id
             LEFT JOIN routes r ON pc.route_id = r.route_id
+            LEFT JOIN child_bus_absence cba ON pc.child_id = cba.child_id AND cba.absence_date = CURDATE()
             LEFT JOIN student_boarding sb ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
             WHERE pc.bus_id = %s OR (pc.bus_id IS NULL AND LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s)))
             GROUP BY pc.child_id
@@ -5186,7 +5484,13 @@ def get_driver_assigned_students(driver_id):
             (bus["bus_id"], bus.get("route"))
         )
         students = cursor.fetchall()
-        serialized_students = [serialize_row(s) for s in students]
+        serialized_students = []
+        for s in students:
+            row_dict = serialize_row(s)
+            if row_dict.get("is_absent") and row_dict.get("boarding_status") != "Boarded":
+                row_dict["boarding_status"] = "SKIP"
+                row_dict["absence_reason"] = "Not Riding Today"
+            serialized_students.append(row_dict)
         return jsonify({
             "success": True,
             "students": serialized_students,
@@ -5239,6 +5543,17 @@ def update_student_boarding(driver_id):
         child = cursor.fetchone()
         if not child:
             return jsonify({"success": False, "message": "Student is not assigned to this driver's bus"}), 400
+
+        # Check if child is marked as Not Riding Today
+        cursor.execute(
+            "SELECT absence_id FROM child_bus_absence WHERE child_id = %s AND absence_date = CURDATE() AND status = 'Not Riding Today'",
+            (child_id,)
+        )
+        if cursor.fetchone() and boarding_status == "Boarded":
+            return jsonify({
+                "success": False,
+                "message": "Child is marked as not riding today."
+            }), 400
 
         cursor.execute("SELECT trip_id FROM driver_trips WHERE driver_id = %s AND status = 'Active' ORDER BY trip_id DESC LIMIT 1", (driver_id,))
         trip = cursor.fetchone()

@@ -247,6 +247,25 @@ INSERT INTO `parent_children` (`child_id`, `parent_id`, `child_name`, `bus_id`, 
 (22, 63, 'Quality Student 1790012468019', 3, 1, 1, 'Class 5'),
 (24, 65, 'Aneena', 8, 14, 30, '10th A');
 
+DROP TABLE IF EXISTS `child_bus_absence`;
+CREATE TABLE `child_bus_absence` (
+  `absence_id` int(11) NOT NULL AUTO_INCREMENT,
+  `child_id` int(11) NOT NULL,
+  `parent_id` int(11) NOT NULL,
+  `route_id` int(11) DEFAULT NULL,
+  `stop_id` int(11) DEFAULT NULL,
+  `absence_date` date NOT NULL,
+  `status` varchar(50) NOT NULL DEFAULT 'Not Riding Today',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`absence_id`),
+  UNIQUE KEY `unique_child_daily_absence` (`child_id`,`absence_date`),
+  KEY `fk_absence_child` (`child_id`),
+  KEY `fk_absence_parent` (`parent_id`),
+  CONSTRAINT `fk_absence_child` FOREIGN KEY (`child_id`) REFERENCES `parent_children` (`child_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_absence_parent` FOREIGN KEY (`parent_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 DROP TABLE IF EXISTS `parent_registration_requests`;
 CREATE TABLE `parent_registration_requests` (
   `request_id` int(11) NOT NULL AUTO_INCREMENT,
