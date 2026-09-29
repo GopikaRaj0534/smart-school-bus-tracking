@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:routesafe/screens/auth/login_screen.dart';
+import 'package:routesafe/widgets/routesafe_logo.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -29,30 +30,27 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      backgroundColor: Color(0xFF2F5CFF),
+      backgroundColor: Color(0xFF1E40AF),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
               Icons.directions_bus_filled_rounded,
-              color: Color(0xFFFFC233),
-              size: 70,
+              color: Color(0xFFF59E0B),
+              size: 75,
             ),
-            SizedBox(height: 25),
-            Text(
-              'RouteSafe',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 36,
-                fontWeight: FontWeight.bold,
-              ),
+            SizedBox(height: 20),
+            RouteSafeLogo(
+              fontSize: 38,
+              isDarkBackground: true,
+              showIcon: false,
             ),
-            SizedBox(height: 10),
+            SizedBox(height: 12),
             Text(
               'SAFE.  SMART.  CONNECTED.',
               style: TextStyle(
-                color: Colors.white,
+                color: Colors.white70,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 2,

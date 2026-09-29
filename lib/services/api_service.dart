@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,8 +7,12 @@ import 'package:http/http.dart' as http;
 
 class ApiService {
   // ============================================================
-  // BASE URL
+  // TIMEOUT & BASE URL
   // ============================================================
+
+  static const Duration _timeoutDuration = Duration(seconds: 15);
+
+  static String? _cachedBaseUrl;
 
   static String get baseUrl {
     const envBaseUrl = String.fromEnvironment(
@@ -19,13 +24,20 @@ class ApiService {
       return envBaseUrl;
     }
 
-    // Android Emulator
-    if (Platform.isAndroid) {
-      return 'http://10.0.2.2:5000';
+    if (_cachedBaseUrl != null) {
+      return _cachedBaseUrl!;
     }
 
-    // Windows / other platforms
+    // Default API base URL for local development (with automatic 10.0.2.2 fallback on Android emulators)
     return 'http://127.0.0.1:5000';
+  }
+
+  // ============================================================
+  // HEALTH CHECK
+  // ============================================================
+
+  static Future<Map<String, dynamic>> healthCheck() async {
+    return _get('/');
   }
 
   // ============================================================
@@ -91,10 +103,6 @@ class ApiService {
     return _get('/buses');
   }
 
-  // ============================================================
-  // ADD BUS
-  // ============================================================
-
   static Future<Map<String, dynamic>> addBus({
     required String busNumber,
     required String route,
@@ -112,10 +120,6 @@ class ApiService {
     );
   }
 
-  // ============================================================
-  // UPDATE BUS
-  // ============================================================
-
   static Future<Map<String, dynamic>> updateBus({
     required int busId,
     required String busNumber,
@@ -123,46 +127,21 @@ class ApiService {
     String? driverName,
     String status = 'Active',
   }) async {
-    final response = await http
-        .put(
-          Uri.parse('$baseUrl/buses/$busId'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: jsonEncode({
-            'bus_number': busNumber.trim(),
-            'route': route.trim(),
-            'driver_name': driverName?.trim(),
-            'status': status.trim(),
-          }),
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _put(
+      '/buses/$busId',
+      {
+        'bus_number': busNumber.trim(),
+        'route': route.trim(),
+        'driver_name': driverName?.trim(),
+        'status': status.trim(),
+      },
+    );
   }
-
-  // ============================================================
-  // DELETE BUS
-  // ============================================================
 
   static Future<Map<String, dynamic>> deleteBus(
     int busId,
   ) async {
-    final response = await http
-        .delete(
-          Uri.parse('$baseUrl/buses/$busId'),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _delete('/buses/$busId');
   }
 
   // ============================================================
@@ -170,23 +149,8 @@ class ApiService {
   // ============================================================
 
   static Future<Map<String, dynamic>> getRoutes() async {
-    final response = await http
-        .get(
-          Uri.parse('$baseUrl/routes'),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _get('/routes');
   }
-
-  // ============================================================
-  // ADD ROUTE
-  // ============================================================
 
   static Future<Map<String, dynamic>> addRoute({
     required String routeName,
@@ -199,57 +163,22 @@ class ApiService {
     );
   }
 
-  // ============================================================
-  // DELETE ROUTE
-  // ============================================================
-
   static Future<Map<String, dynamic>> deleteRoute(
     int routeId,
   ) async {
-    final response = await http
-        .delete(
-          Uri.parse('$baseUrl/admin/routes/$routeId'),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _delete('/admin/routes/$routeId');
   }
 
   // ============================================================
-  // GET STOPS
+  // STOPS
   // ============================================================
 
   static Future<Map<String, dynamic>> getStops({
     int? routeId,
   }) async {
-    final uri = routeId == null
-        ? Uri.parse('$baseUrl/admin/stops')
-        : Uri.parse(
-            '$baseUrl/admin/stops?route_id=$routeId',
-          );
-
-    final response = await http
-        .get(
-          uri,
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    final path = routeId == null ? '/admin/stops' : '/admin/stops?route_id=$routeId';
+    return _get(path);
   }
-
-  // ============================================================
-  // ADD STOP
-  // ============================================================
 
   static Future<Map<String, dynamic>> addStop({
     required int routeId,
@@ -270,57 +199,23 @@ class ApiService {
     );
   }
 
-  // ============================================================
-  // DELETE STOP
-  // ============================================================
-
   static Future<Map<String, dynamic>> deleteStop(
     int stopId,
   ) async {
-    final response = await http
-        .delete(
-          Uri.parse('$baseUrl/admin/stops/$stopId'),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _delete('/admin/stops/$stopId');
   }
 
   // ============================================================
-  // DRIVER COUNT
+  // DRIVERS
   // ============================================================
 
   static Future<Map<String, dynamic>> getDriversCount() async {
     return _get('/drivers/count');
   }
 
-  // ============================================================
-  // GET DRIVERS
-  // ============================================================
-
   static Future<Map<String, dynamic>> getDrivers() async {
-    final response = await http
-        .get(
-          Uri.parse('$baseUrl/drivers'),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _get('/drivers');
   }
-
-  // ============================================================
-  // ADD DRIVER
-  // ============================================================
 
   static Future<Map<String, dynamic>> addDriver({
     required String fullName,
@@ -338,10 +233,6 @@ class ApiService {
       },
     );
   }
-
-  // ============================================================
-  // DRIVER 2FA PHONE CHANGE
-  // ============================================================
 
   static Future<Map<String, dynamic>> requestDriverPhoneChange({
     required int driverId,
@@ -367,10 +258,6 @@ class ApiService {
     );
   }
 
-  // ============================================================
-  // UPDATE DRIVER
-  // ============================================================
-
   static Future<Map<String, dynamic>> updateDriver({
     required int driverId,
     required String fullName,
@@ -378,78 +265,34 @@ class ApiService {
     required String phone,
     String? password,
   }) async {
-    final response = await http
-        .put(
-          Uri.parse('$baseUrl/drivers/$driverId'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: jsonEncode({
-            'full_name': fullName.trim(),
-            'email': email.trim().toLowerCase(),
-            'phone': phone.trim(),
-            'password': password,
-          }),
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _put(
+      '/drivers/$driverId',
+      {
+        'full_name': fullName.trim(),
+        'email': email.trim().toLowerCase(),
+        'phone': phone.trim(),
+        'password': password,
+      },
+    );
   }
-
-  // ============================================================
-  // DELETE DRIVER
-  // ============================================================
 
   static Future<Map<String, dynamic>> deleteDriver(
     int driverId,
   ) async {
-    final response = await http
-        .delete(
-          Uri.parse('$baseUrl/drivers/$driverId'),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _delete('/drivers/$driverId');
   }
 
   // ============================================================
-  // PARENT COUNT
+  // PARENTS
   // ============================================================
 
   static Future<Map<String, dynamic>> getParentsCount() async {
     return _get('/parents/count');
   }
 
-  // ============================================================
-  // GET PARENTS
-  // ============================================================
-
   static Future<Map<String, dynamic>> getParents() async {
-    final response = await http
-        .get(
-          Uri.parse('$baseUrl/parents'),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _get('/parents');
   }
-
-  // ============================================================
-  // ADD PARENT
-  // ============================================================
 
   static Future<Map<String, dynamic>> addParent({
     required String fullName,
@@ -468,10 +311,6 @@ class ApiService {
     );
   }
 
-  // ============================================================
-  // UPDATE PARENT
-  // ============================================================
-
   static Future<Map<String, dynamic>> updateParent({
     required int parentId,
     required String fullName,
@@ -479,46 +318,21 @@ class ApiService {
     required String phone,
     String? password,
   }) async {
-    final response = await http
-        .put(
-          Uri.parse('$baseUrl/parents/$parentId'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: jsonEncode({
-            'full_name': fullName.trim(),
-            'email': email.trim().toLowerCase(),
-            'phone': phone.trim(),
-            'password': password,
-          }),
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _put(
+      '/parents/$parentId',
+      {
+        'full_name': fullName.trim(),
+        'email': email.trim().toLowerCase(),
+        'phone': phone.trim(),
+        'password': password,
+      },
+    );
   }
-
-  // ============================================================
-  // DELETE PARENT
-  // ============================================================
 
   static Future<Map<String, dynamic>> deleteParent(
     int parentId,
   ) async {
-    final response = await http
-        .delete(
-          Uri.parse('$baseUrl/parents/$parentId'),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _delete('/parents/$parentId');
   }
 
   // ============================================================
@@ -534,33 +348,11 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> approveParent(int parentId) async {
-    final response = await http
-        .put(
-          Uri.parse('$baseUrl/admin/parents/$parentId/approve'),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _put('/admin/parents/$parentId/approve');
   }
 
   static Future<Map<String, dynamic>> rejectParent(int parentId) async {
-    final response = await http
-        .put(
-          Uri.parse('$baseUrl/admin/parents/$parentId/reject'),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _put('/admin/parents/$parentId/reject');
   }
 
   // ============================================================
@@ -568,18 +360,7 @@ class ApiService {
   // ============================================================
 
   static Future<Map<String, dynamic>> getChildren() async {
-    final response = await http
-        .get(
-          Uri.parse('$baseUrl/admin/children'),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _get('/admin/children');
   }
 
   static Future<Map<String, dynamic>> linkChild({
@@ -615,28 +396,39 @@ class ApiService {
     );
   }
 
+  static Future<Map<String, dynamic>> getStopsForRoute(int routeId) async {
+    return _get('/routes/$routeId/stops');
+  }
+
+  static Future<Map<String, dynamic>> updateChildPickupStop({
+    required int parentId,
+    required int childId,
+    required int stopId,
+    int? routeId,
+  }) async {
+    return _post(
+      '/parent/$parentId/child/$childId/stop',
+      {
+        'parent_id': parentId,
+        'child_id': childId,
+        'stop_id': stopId,
+        'route_id': routeId,
+      }..removeWhere((key, value) => value == null),
+    );
+  }
+
   static Future<Map<String, dynamic>> assignDriverToBus({
     required int busId,
     int? driverId,
     String? driverName,
   }) async {
-    final response = await http
-        .put(
-          Uri.parse('$baseUrl/admin/buses/$busId/assign-driver'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: jsonEncode({
-            'driver_id': driverId,
-            'driver_name': driverName,
-          }..removeWhere((key, value) => value == null)),
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _put(
+      '/admin/buses/$busId/assign-driver',
+      {
+        'driver_id': driverId,
+        'driver_name': driverName,
+      }..removeWhere((key, value) => value == null),
+    );
   }
 
   static Future<Map<String, dynamic>> assignChildTransport({
@@ -645,96 +437,37 @@ class ApiService {
     int? routeId,
     int? pickupStopId,
   }) async {
-    final response = await http
-        .put(
-          Uri.parse('$baseUrl/admin/children/$childId/assign'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: jsonEncode({
-            'bus_id': busId,
-            'route_id': routeId,
-            'pickup_stop_id': pickupStopId,
-          }..removeWhere((key, value) => value == null)),
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _put(
+      '/admin/children/$childId/assign',
+      {
+        'bus_id': busId,
+        'route_id': routeId,
+        'pickup_stop_id': pickupStopId,
+      }..removeWhere((key, value) => value == null),
+    );
   }
 
   // ============================================================
-  // PARENT DASHBOARD
+  // DASHBOARDS & TRIPS
   // ============================================================
 
   static Future<Map<String, dynamic>> getParentDashboard(
     int parentId,
   ) async {
-    final response = await http
-        .get(
-          Uri.parse('$baseUrl/parent/$parentId/dashboard'),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _get('/parent/$parentId/dashboard');
   }
-
-  // ============================================================
-  // DRIVER DASHBOARD
-  // ============================================================
 
   static Future<Map<String, dynamic>> getDriverDashboard(
     int driverId,
   ) async {
-    final response = await http
-        .get(
-          Uri.parse(
-            '$baseUrl/driver/$driverId/dashboard',
-          ),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _get('/driver/$driverId/dashboard');
   }
-
-  // ============================================================
-  // DRIVER BUS
-  // ============================================================
 
   static Future<Map<String, dynamic>> getDriverBus(
     int driverId,
   ) async {
-    final response = await http
-        .get(
-          Uri.parse(
-            '$baseUrl/driver/$driverId/bus',
-          ),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _get('/driver/$driverId/bus');
   }
-
-  // ============================================================
-  // START TRIP
-  // ============================================================
 
   static Future<Map<String, dynamic>> startTrip(
     int driverId,
@@ -745,10 +478,6 @@ class ApiService {
     );
   }
 
-  // ============================================================
-  // END TRIP
-  // ============================================================
-
   static Future<Map<String, dynamic>> endTrip(
     int driverId,
   ) async {
@@ -757,10 +486,6 @@ class ApiService {
       {},
     );
   }
-
-  // ============================================================
-  // UPDATE DRIVER LOCATION
-  // ============================================================
 
   static Future<Map<String, dynamic>> updateDriverLocation({
     required int driverId,
@@ -776,32 +501,11 @@ class ApiService {
     );
   }
 
-  // ============================================================
-  // GET LATEST DRIVER LOCATION
-  // ============================================================
-
   static Future<Map<String, dynamic>> getDriverLocation(
     int driverId,
   ) async {
-    final response = await http
-        .get(
-          Uri.parse(
-            '$baseUrl/driver/$driverId/location',
-          ),
-          headers: {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(
-          const Duration(seconds: 8),
-        );
-
-    return _decodeBody(response);
+    return _get('/driver/$driverId/location');
   }
-
-  // ============================================================
-  // REPORT EMERGENCY
-  // ============================================================
 
   static Future<Map<String, dynamic>> reportEmergency({
     required int driverId,
@@ -815,104 +519,577 @@ class ApiService {
     );
   }
 
+  static Future<Map<String, dynamic>> getChildLocation({
+    required int parentId,
+    required int childId,
+  }) async {
+    return _get('/parent/$parentId/child/$childId/location');
+  }
+
+  static Future<Map<String, dynamic>> getAdminEmergencies() async {
+    return _get('/admin/emergencies');
+  }
+
   // ============================================================
-  // GET HELPER
+  // PENDING DRIVER REQUESTS
   // ============================================================
+
+  static Future<Map<String, dynamic>> getPendingDriverRequests() async {
+    return _get('/admin/driver-requests');
+  }
+
+  static Future<Map<String, dynamic>> getPendingDriverCount() async {
+    return _get('/admin/driver-requests/count');
+  }
+
+  static Future<Map<String, dynamic>> approveDriver({
+    required int driverId,
+    int? busId,
+  }) async {
+    return _put(
+      '/admin/drivers/$driverId/approve',
+      {
+        'bus_id': busId,
+      }..removeWhere((key, value) => value == null),
+    );
+  }
+
+  static Future<Map<String, dynamic>> rejectDriver(int driverId, [String? reason]) async {
+    return _put(
+      '/admin/drivers/$driverId/reject',
+      {
+        if (reason != null && reason.trim().isNotEmpty) 'rejection_reason': reason.trim(),
+      },
+    );
+  }
+
+  static Future<Map<String, dynamic>> getAdminDashboardMetrics() async {
+    return _get('/admin/dashboard/metrics');
+  }
+
+  static Future<Map<String, dynamic>> getAdminAnalytics() async {
+    return _get('/admin/analytics');
+  }
+
+  static Future<Map<String, dynamic>> addAdminRoute(String routeName) async {
+    return _post('/admin/routes', {'route_name': routeName.trim()});
+  }
+
+  static Future<Map<String, dynamic>> updateAdminRoute(int routeId, String routeName) async {
+    return _put('/admin/routes/$routeId', {'route_name': routeName.trim()});
+  }
+
+  static Future<Map<String, dynamic>> deleteAdminRoute(int routeId) async {
+    return _delete('/admin/routes/$routeId');
+  }
+
+  static Future<Map<String, dynamic>> addAdminStop({
+    required int routeId,
+    required String stopName,
+    int? stopOrder,
+    double? latitude,
+    double? longitude,
+  }) async {
+    return _post(
+      '/admin/routes/$routeId/stops',
+      {
+        'stop_name': stopName.trim(),
+        'stop_order': stopOrder ?? 1,
+        'latitude': ?latitude,
+        'longitude': ?longitude,
+      },
+    );
+  }
+
+  static Future<Map<String, dynamic>> updateAdminStop({
+    required int stopId,
+    String? stopName,
+    int? stopOrder,
+    double? latitude,
+    double? longitude,
+  }) async {
+    return _put(
+      '/admin/stops/$stopId',
+      {
+        'stop_name': ?stopName?.trim(),
+        'stop_order': ?stopOrder,
+        'latitude': ?latitude,
+        'longitude': ?longitude,
+      },
+    );
+  }
+
+  static Future<Map<String, dynamic>> deleteAdminStop(int stopId) async {
+    return _delete('/admin/stops/$stopId');
+  }
+
+  static Future<Map<String, dynamic>> getAdminStops() async {
+    return _get('/admin/stops');
+  }
+
+  static Future<Map<String, dynamic>> getAdminChildren() async {
+    return _get('/admin/children');
+  }
+
+  static Future<Map<String, dynamic>> assignChild({
+    int? parentId,
+    required String childName,
+    String? className,
+    int? busId,
+    int? pickupStopId,
+  }) async {
+    return _post(
+      '/admin/children',
+      {
+        'parent_id': ?parentId,
+        'child_name': childName.trim(),
+        if (className != null && className.trim().isNotEmpty)
+          'class_name': className.trim(),
+        'bus_id': ?busId,
+        'pickup_stop_id': ?pickupStopId,
+      },
+    );
+  }
+
+  static Future<Map<String, dynamic>> deleteChild(int childId) async {
+    return _delete('/admin/children/$childId');
+  }
+
+  static Future<Map<String, dynamic>> getAdminHistory([String type = 'trips']) async {
+    return _get('/admin/history?type=$type');
+  }
+
+  // ============================================================
+  // DRIVER MODULE METHODS
+  // ============================================================
+
+  static Future<Map<String, dynamic>> getDriverStatus(int driverId) async {
+    return _get('/driver/$driverId/status');
+  }
+
+  static Future<Map<String, dynamic>> getDriverBusDetails(int driverId) async {
+    return _get('/driver/$driverId/bus');
+  }
+
+  static Future<Map<String, dynamic>> getDriverStudents(int driverId) async {
+    return _get('/driver/$driverId/students');
+  }
+
+  static Future<Map<String, dynamic>> getDriverBoarding(int driverId) async {
+    return _get('/driver/$driverId/boarding');
+  }
+
+  static Future<Map<String, dynamic>> updateStudentBoarding({
+    required int driverId,
+    required int childId,
+    required String boardingStatus,
+    int? stopId,
+  }) async {
+    return _post(
+      '/driver/$driverId/boarding/update',
+      {
+        'child_id': childId,
+        'boarding_status': boardingStatus,
+        'stop_id': ?stopId,
+      },
+    );
+  }
+
+  static Future<Map<String, dynamic>> getDriverTrips(int driverId) async {
+    return _get('/driver/$driverId/trips');
+  }
+
+  static Future<Map<String, dynamic>> getDriverEmergencies(int driverId) async {
+    return _get('/driver/$driverId/emergencies');
+  }
+
+  static Future<Map<String, dynamic>> reportDriverEmergency({
+    required int driverId,
+    required String emergencyType,
+    required String message,
+    double? latitude,
+    double? longitude,
+    int? busId,
+  }) async {
+    return _post(
+      '/driver/$driverId/emergency',
+      {
+        'emergency_type': emergencyType,
+        'message': message,
+        'latitude': ?latitude,
+        'longitude': ?longitude,
+        'bus_id': ?busId,
+      },
+    );
+  }
+
+  static Future<Map<String, dynamic>> startDriverTrip(int driverId) async {
+    return _post('/driver/$driverId/trip/start', {});
+  }
+
+  static Future<Map<String, dynamic>> endDriverTrip(int driverId) async {
+    return _post('/driver/$driverId/trip/end', {});
+  }
+
+  // ============================================================
+  // SCHOOL SETTINGS
+  // ============================================================
+
+  static Future<Map<String, dynamic>> getSchoolSettings() async {
+    return _get('/school-settings');
+  }
+
+  static Future<Map<String, dynamic>> updateSchoolSettings({
+    required String schoolName,
+    required String address,
+    required double latitude,
+    required double longitude,
+  }) async {
+    return _put(
+      '/school-settings',
+      {
+        'school_name': schoolName.trim(),
+        'address': address.trim(),
+        'latitude': latitude,
+        'longitude': longitude,
+      },
+    );
+  }
+
+  static Future<Map<String, dynamic>> getParentNotifications(int parentId) async {
+    return _get('/parent/$parentId/notifications');
+  }
+
+  // ============================================================
+  // HTTP HELPERS WITH TIMEOUT & DYNAMIC FALLBACK
+  // ============================================================
+
+  static Future<http.Response> _sendWithFallback(
+    Future<http.Response> Function(String currentBaseUrl) makeRequest,
+  ) async {
+    final primaryBase = baseUrl;
+    try {
+      final response = await makeRequest(primaryBase).timeout(_timeoutDuration);
+      _cachedBaseUrl = primaryBase;
+      return response;
+    } catch (e) {
+      const envBaseUrl = String.fromEnvironment('ROUTESAFE_API_BASE_URL', defaultValue: '');
+      if (!kIsWeb && Platform.isAndroid && envBaseUrl.isEmpty && _isConnectionError(e)) {
+        final fallbackBase = primaryBase.contains('127.0.0.1')
+            ? 'http://10.0.2.2:5000'
+            : 'http://127.0.0.1:5000';
+        try {
+          final response = await makeRequest(fallbackBase).timeout(_timeoutDuration);
+          _cachedBaseUrl = fallbackBase;
+          debugPrint('RouteSafe ApiService auto-detected backend URL: $fallbackBase');
+          return response;
+        } catch (_) {}
+      }
+      rethrow;
+    }
+  }
+
+  static bool _isConnectionError(Object e) {
+    if (e is SocketException || e is http.ClientException || e is TimeoutException) {
+      return true;
+    }
+    final msg = e.toString().toLowerCase();
+    return msg.contains('socketexception') ||
+        msg.contains('connection refused') ||
+        msg.contains('clientexception') ||
+        msg.contains('failed to connect') ||
+        msg.contains('network is unreachable') ||
+        msg.contains('connection timed out');
+  }
 
   static Future<Map<String, dynamic>> _get(String path) async {
     try {
-      final url = Uri.parse('$baseUrl$path');
-
-      debugPrint('========================================');
-      debugPrint('GET REQUEST');
-      debugPrint('URL: $url');
-      debugPrint('========================================');
-
-      final response = await http
-          .get(
-            url,
-            headers: {
-              'Accept': 'application/json',
-            },
-          )
-          .timeout(
-            const Duration(seconds: 8),
-          );
+      final response = await _sendWithFallback((base) {
+        final url = Uri.parse('$base$path');
+        debugPrint('========================================');
+        debugPrint('GET REQUEST: $url');
+        debugPrint('========================================');
+        return http.get(
+          url,
+          headers: {
+            'Accept': 'application/json',
+          },
+        );
+      });
 
       debugPrint('GET STATUS: ${response.statusCode}');
       debugPrint('GET RESPONSE: ${response.body}');
 
       return _decodeBody(response);
+    } on TimeoutException {
+      throw Exception(
+        'Connection timed out reaching RouteSafe server ($baseUrl). '
+        'Please check if the backend server is running and accessible.',
+      );
     } on SocketException catch (e) {
       throw Exception(
-        'Cannot connect to RouteSafe server. '
+        'Cannot connect to RouteSafe server ($baseUrl). '
         'Make sure Flask is running on port 5000. '
-        'Error: $e',
+        'Error: ${e.message}',
       );
     } on http.ClientException catch (e) {
       throw Exception(
-        'Network error: $e',
+        'Network connection error ($baseUrl): ${e.message}',
       );
     } on FormatException {
       throw Exception(
-        'Server returned invalid JSON',
+        'Server returned invalid JSON response format.',
+      );
+    } catch (e) {
+      throw Exception(
+        e.toString().replaceFirst('Exception: ', ''),
       );
     }
   }
-
-  // ============================================================
-  // POST HELPER
-  // ============================================================
 
   static Future<Map<String, dynamic>> _post(
     String path,
     Map<String, dynamic> body,
   ) async {
     try {
-      final url = Uri.parse('$baseUrl$path');
+      final response = await _sendWithFallback((base) {
+        final url = Uri.parse('$base$path');
+        debugPrint('========================================');
+        debugPrint('POST REQUEST: $url');
+        debugPrint('BODY: ${jsonEncode(body)}');
+        debugPrint('========================================');
+        return http.post(
+          url,
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: jsonEncode(body),
+        );
+      });
 
-      debugPrint('========================================');
-      debugPrint('POST REQUEST');
-      debugPrint('URL: $url');
-      debugPrint('BODY: ${jsonEncode(body)}');
-      debugPrint('========================================');
-
-      final response = await http
-          .post(
-            url,
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: jsonEncode(body),
-          )
-          .timeout(
-            const Duration(seconds: 8),
-          );
-
-      debugPrint('STATUS: ${response.statusCode}');
-      debugPrint('RESPONSE: ${response.body}');
+      debugPrint('POST STATUS: ${response.statusCode}');
+      debugPrint('POST RESPONSE: ${response.body}');
 
       return _decodeBody(response);
+    } on TimeoutException {
+      throw Exception(
+        'Connection timed out reaching RouteSafe server ($baseUrl). '
+        'Please check if the backend server is running and accessible.',
+      );
     } on SocketException catch (e) {
       throw Exception(
-        'Cannot connect to RouteSafe server. '
+        'Cannot connect to RouteSafe server ($baseUrl). '
         'Make sure Flask is running on port 5000. '
-        'Error: $e',
+        'Error: ${e.message}',
       );
     } on http.ClientException catch (e) {
       throw Exception(
-        'Network error: $e',
+        'Network connection error ($baseUrl): ${e.message}',
       );
     } on FormatException {
       throw Exception(
-        'Server returned invalid JSON',
+        'Server returned invalid JSON response format.',
+      );
+    } catch (e) {
+      throw Exception(
+        e.toString().replaceFirst('Exception: ', ''),
+      );
+    }
+  }
+
+  static Future<Map<String, dynamic>> _put(
+    String path, [
+    Map<String, dynamic>? body,
+  ]) async {
+    try {
+      final response = await _sendWithFallback((base) {
+        final url = Uri.parse('$base$path');
+        debugPrint('========================================');
+        debugPrint('PUT REQUEST: $url');
+        if (body != null) {
+          debugPrint('BODY: ${jsonEncode(body)}');
+        }
+        debugPrint('========================================');
+        return http.put(
+          url,
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: body != null ? jsonEncode(body) : null,
+        );
+      });
+
+      debugPrint('PUT STATUS: ${response.statusCode}');
+      debugPrint('PUT RESPONSE: ${response.body}');
+
+      return _decodeBody(response);
+    } on TimeoutException {
+      throw Exception(
+        'Connection timed out reaching RouteSafe server ($baseUrl). '
+        'Please check if the backend server is running and accessible.',
+      );
+    } on SocketException catch (e) {
+      throw Exception(
+        'Cannot connect to RouteSafe server ($baseUrl). '
+        'Make sure Flask is running on port 5000. '
+        'Error: ${e.message}',
+      );
+    } on http.ClientException catch (e) {
+      throw Exception(
+        'Network connection error ($baseUrl): ${e.message}',
+      );
+    } on FormatException {
+      throw Exception(
+        'Server returned invalid JSON response format.',
+      );
+    } catch (e) {
+      throw Exception(
+        e.toString().replaceFirst('Exception: ', ''),
+      );
+    }
+  }
+
+  static Future<Map<String, dynamic>> _delete(String path) async {
+    try {
+      final response = await _sendWithFallback((base) {
+        final url = Uri.parse('$base$path');
+        debugPrint('========================================');
+        debugPrint('DELETE REQUEST: $url');
+        debugPrint('========================================');
+        return http.delete(
+          url,
+          headers: {
+            'Accept': 'application/json',
+          },
+        );
+      });
+
+      debugPrint('DELETE STATUS: ${response.statusCode}');
+      debugPrint('DELETE RESPONSE: ${response.body}');
+
+      return _decodeBody(response);
+    } on TimeoutException {
+      throw Exception(
+        'Connection timed out reaching RouteSafe server ($baseUrl). '
+        'Please check if the backend server is running and accessible.',
+      );
+    } on SocketException catch (e) {
+      throw Exception(
+        'Cannot connect to RouteSafe server ($baseUrl). '
+        'Make sure Flask is running on port 5000. '
+        'Error: ${e.message}',
+      );
+    } on http.ClientException catch (e) {
+      throw Exception(
+        'Network connection error ($baseUrl): ${e.message}',
+      );
+    } on FormatException {
+      throw Exception(
+        'Server returned invalid JSON response format.',
+      );
+    } catch (e) {
+      throw Exception(
+        e.toString().replaceFirst('Exception: ', ''),
       );
     }
   }
 
   // ============================================================
-  // RESPONSE HANDLER
+  // DRIVER 2FA SECURITY API METHODS
+  // ============================================================
+
+  static Future<Map<String, dynamic>> getDriver2FAStatus(int driverId) async {
+    return _get('/api/driver/2fa/status?driver_id=$driverId');
+  }
+
+  static Future<Map<String, dynamic>> verifyDriver2FALogin({
+    required String tempToken,
+    required String otp,
+  }) async {
+    return _post('/api/driver/2fa/verify-login', {
+      'temp_token': tempToken.trim(),
+      'otp': otp.trim(),
+    });
+  }
+
+  static Future<Map<String, dynamic>> resendDriver2FAOTP({
+    required String tempToken,
+    String purpose = 'LOGIN',
+  }) async {
+    return _post('/api/driver/2fa/resend-otp', {
+      'temp_token': tempToken.trim(),
+      'purpose': purpose,
+    });
+  }
+
+  static Future<Map<String, dynamic>> requestEnable2FA(int driverId) async {
+    return _post('/api/driver/2fa/request-enable', {
+      'driver_id': driverId,
+    });
+  }
+
+  static Future<Map<String, dynamic>> verifyEnable2FA({
+    required int driverId,
+    required String tempToken,
+    required String otp,
+  }) async {
+    return _post('/api/driver/2fa/verify-enable', {
+      'driver_id': driverId,
+      'temp_token': tempToken.trim(),
+      'otp': otp.trim(),
+    });
+  }
+
+  static Future<Map<String, dynamic>> requestDisable2FA({
+    required int driverId,
+    required String password,
+  }) async {
+    return _post('/api/driver/2fa/request-disable', {
+      'driver_id': driverId,
+      'password': password.trim(),
+    });
+  }
+
+  static Future<Map<String, dynamic>> verifyDisable2FA({
+    required int driverId,
+    required String otp,
+  }) async {
+    return _post('/api/driver/2fa/verify-disable', {
+      'driver_id': driverId,
+      'otp': otp.trim(),
+    });
+  }
+
+  static Future<Map<String, dynamic>> requestDriver2FARecovery({
+    required String email,
+    String? phone,
+  }) async {
+    return _post('/api/driver/2fa/request-recovery', {
+      'email': email.trim().toLowerCase(),
+      if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
+    });
+  }
+
+  static Future<Map<String, dynamic>> verifyDriver2FARecovery({
+    required String tempToken,
+    required String otp,
+  }) async {
+    return _post('/api/driver/2fa/verify-recovery', {
+      'temp_token': tempToken.trim(),
+      'otp': otp.trim(),
+    });
+  }
+
+  static Future<Map<String, dynamic>> adminResetDriver2FA(int driverId) async {
+    return _post('/api/admin/driver/reset-2fa', {
+      'driver_id': driverId,
+    });
+  }
+
+  // ============================================================
+  // RESPONSE DECODER
   // ============================================================
 
   static Map<String, dynamic> _decodeBody(
@@ -923,9 +1100,10 @@ class ApiService {
     try {
       data = jsonDecode(response.body);
     } catch (_) {
+      final bodyText = response.body.trim();
+      final preview = bodyText.length > 120 ? '${bodyText.substring(0, 120)}...' : bodyText;
       throw Exception(
-        'Server returned invalid response '
-        '(${response.statusCode})',
+        'Server error (${response.statusCode}): ${preview.isNotEmpty ? preview : "Invalid response format"}',
       );
     }
 
@@ -933,6 +1111,10 @@ class ApiService {
       throw Exception(
         'Invalid server response format',
       );
+    }
+
+    if (response.statusCode == 403 && data['status'] != null) {
+      return data;
     }
 
     if (response.statusCode >= 400) {
