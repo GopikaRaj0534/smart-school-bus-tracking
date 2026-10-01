@@ -10,7 +10,7 @@ class ApiService {
   // TIMEOUT & BASE URL
   // ============================================================
 
-  static const Duration _timeoutDuration = Duration(seconds: 15);
+  static const Duration _timeoutDuration = Duration(seconds: 60);
 
   static const String defaultProductionUrl =
       'https://smart-school-bus-tracking.onrender.com';
@@ -41,8 +41,12 @@ class ApiService {
       return _cachedBaseUrl!;
     }
 
-    // Default API base URL for deployed Render production backend HTTPS
-    return defaultProductionUrl;
+    // Use live HTTPS Render backend for Release builds; use local Flask server for Debug/Tests
+    if (kReleaseMode) {
+      return defaultProductionUrl;
+    }
+
+    return 'http://127.0.0.1:5000';
   }
 
   // ============================================================
@@ -114,6 +118,10 @@ class ApiService {
 
   static Future<Map<String, dynamic>> getBuses() async {
     return _get('/buses');
+  }
+
+  static Future<Map<String, dynamic>> getAvailableBuses() async {
+    return _get('/buses/available');
   }
 
   static Future<Map<String, dynamic>> addBus({
@@ -787,16 +795,22 @@ class ApiService {
       return response;
     } catch (e) {
       const envBaseUrl = String.fromEnvironment('ROUTESAFE_API_BASE_URL', defaultValue: '');
-      if (!kIsWeb && Platform.isAndroid && envBaseUrl.isEmpty && _isConnectionError(e)) {
-        final fallbackBase = primaryBase.contains('127.0.0.1')
-            ? 'http://10.0.2.2:5000'
-            : 'http://127.0.0.1:5000';
-        try {
-          final response = await makeRequest(fallbackBase).timeout(_timeoutDuration);
-          _cachedBaseUrl = fallbackBase;
-          debugPrint('RouteSafe ApiService auto-detected backend URL: $fallbackBase');
-          return response;
-        } catch (_) {}
+      if (envBaseUrl.isEmpty && _isConnectionError(e)) {
+        final List<String> fallbackBases = [];
+        if (primaryBase != defaultProductionUrl && defaultProductionUrl.isNotEmpty) {
+          fallbackBases.add(defaultProductionUrl);
+        }
+        if (primaryBase != 'http://10.0.2.2:5000') fallbackBases.add('http://10.0.2.2:5000');
+        if (primaryBase != 'http://127.0.0.1:5000') fallbackBases.add('http://127.0.0.1:5000');
+
+        for (final fallbackBase in fallbackBases) {
+          try {
+            final response = await makeRequest(fallbackBase).timeout(_timeoutDuration);
+            _cachedBaseUrl = fallbackBase;
+            debugPrint('RouteSafe ApiService auto-detected backend URL: $fallbackBase');
+            return response;
+          } catch (_) {}
+        }
       }
       rethrow;
     }

@@ -189,68 +189,64 @@ class _ManageBusesScreenState
   Future<void> _showBusForm({
     Map<String, dynamic>? existingBus,
   }) async {
-
-    final busNumberController =
-        TextEditingController(
-      text:
-          existingBus?['bus_number']
-                  ?.toString() ??
-              '',
+    final busNumberController = TextEditingController(
+      text: existingBus?['bus_number']?.toString() ?? '',
     );
 
-    final driverController =
-        TextEditingController(
-      text:
-          existingBus?['driver_name']
-                  ?.toString() ??
-              '',
+    final driverController = TextEditingController(
+      text: existingBus?['driver_name']?.toString() ?? '',
     );
 
     String? selectedRoute;
 
     if (existingBus != null) {
-
-      final existingRoute =
-          existingBus['route']
-              ?.toString()
-              .trim();
-
-      if (existingRoute != null &&
-          existingRoute.isNotEmpty) {
-
+      final existingRoute = existingBus['route']?.toString().trim();
+      if (existingRoute != null && existingRoute.isNotEmpty) {
         selectedRoute = existingRoute;
       }
     }
 
-    String status =
-        existingBus?['status']
-                ?.toString() ??
-            'Active';
+    String status = existingBus?['status']?.toString() ?? 'Active';
+    final formKey = GlobalKey<FormState>();
 
-    final formKey =
-        GlobalKey<FormState>();
+    List<String> availableDrivers = ['Not Assigned'];
+    try {
+      final driversRes = await ApiService.getDrivers();
+      if (driversRes['success'] == true && driversRes['drivers'] is List) {
+        final dList = List<Map<String, dynamic>>.from(driversRes['drivers']);
+        for (var d in dList) {
+          final name = d['full_name']?.toString().trim();
+          if (name != null && name.isNotEmpty && !availableDrivers.contains(name)) {
+            availableDrivers.add(name);
+          }
+        }
+      }
+    } catch (_) {}
+
+    String currentDriver = driverController.text.trim();
+    if (currentDriver.isEmpty || currentDriver.toLowerCase() == 'unassigned') {
+      currentDriver = 'Not Assigned';
+    }
+    if (!availableDrivers.contains(currentDriver)) {
+      availableDrivers.add(currentDriver);
+    }
 
     // ------------------------------------------------------------
     // ENSURE ROUTES ARE AVAILABLE
     // ------------------------------------------------------------
-
     if (routes.isEmpty) {
-
       await _loadRoutes();
     }
 
     if (!mounted) {
-
       busNumberController.dispose();
       driverController.dispose();
-
       return;
     }
 
     // ------------------------------------------------------------
     // SHOW DIALOG
     // ------------------------------------------------------------
-
     final bool? shouldRefresh = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -289,13 +285,18 @@ class _ManageBusesScreenState
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
+                        key: ValueKey(dropdownValue),
                         initialValue: dropdownValue,
+                        isExpanded: true,
                         decoration: const InputDecoration(
                           labelText: 'Assigned Route',
                           prefixIcon: Icon(Icons.alt_route),
                         ),
                         items: routeValues.map((name) {
-                          return DropdownMenuItem(value: name, child: Text(name));
+                          return DropdownMenuItem<String>(
+                            value: name,
+                            child: Text(name, overflow: TextOverflow.ellipsis),
+                          );
                         }).toList(),
                         onChanged: (val) {
                           setDialogState(() {
@@ -305,25 +306,50 @@ class _ManageBusesScreenState
                         validator: (v) => (v == null || v.trim().isEmpty) ? 'Route selection is required' : null,
                       ),
                       const SizedBox(height: 12),
-                      TextFormField(
-                        controller: driverController,
-                        textCapitalization: TextCapitalization.words,
+                      DropdownButtonFormField<String>(
+                        key: ValueKey(currentDriver),
+                        initialValue: currentDriver,
+                        isExpanded: true,
                         decoration: const InputDecoration(
-                          labelText: 'Assigned Driver Name (Optional)',
+                          labelText: 'Assigned Driver',
                           prefixIcon: Icon(Icons.person),
                         ),
+                        items: availableDrivers.map((driverName) {
+                          final isUnassigned = driverName == 'Not Assigned';
+                          return DropdownMenuItem<String>(
+                            value: driverName,
+                            child: Text(
+                              driverName,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: isUnassigned ? AppColors.textSecondary : AppColors.textPrimary,
+                                fontWeight: isUnassigned ? FontWeight.normal : FontWeight.bold,
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          if (val != null) {
+                            setDialogState(() {
+                              currentDriver = val;
+                              driverController.text = val;
+                            });
+                          }
+                        },
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
+                        key: ValueKey(status),
                         initialValue: status,
+                        isExpanded: true,
                         decoration: const InputDecoration(
                           labelText: 'Bus Status',
                           prefixIcon: Icon(Icons.info_outline),
                         ),
                         items: const [
-                          DropdownMenuItem(value: 'Active', child: Text('Active')),
-                          DropdownMenuItem(value: 'Maintenance', child: Text('Maintenance')),
-                          DropdownMenuItem(value: 'Inactive', child: Text('Inactive')),
+                          DropdownMenuItem<String>(value: 'Active', child: Text('Active')),
+                          DropdownMenuItem<String>(value: 'Maintenance', child: Text('Maintenance')),
+                          DropdownMenuItem<String>(value: 'Inactive', child: Text('Inactive')),
                         ],
                         onChanged: (val) {
                           if (val != null) {
@@ -348,9 +374,14 @@ class _ManageBusesScreenState
                       : () async {
                           if (!formKey.currentState!.validate()) return;
                           if (selectedRoute == null || selectedRoute!.trim().isEmpty) {
-                            ScaffoldMessenger.of(dialogContext).showSnackBar(
-                              const SnackBar(content: Text('Please select a route')),
-                            );
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Please select a route'),
+                                  backgroundColor: AppColors.danger,
+                                ),
+                              );
+                            }
                             return;
                           }
 
@@ -387,24 +418,29 @@ class _ManageBusesScreenState
                               setDialogState(() {
                                 isSaving = false;
                               });
-                              ScaffoldMessenger.of(dialogContext).showSnackBar(
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(result['message']?.toString() ?? 'Operation failed'),
+                                    backgroundColor: AppColors.danger,
+                                  ),
+                                );
+                              }
+                            }
+                          } catch (e) {
+                            if (dialogContext.mounted) {
+                              setDialogState(() {
+                                isSaving = false;
+                              });
+                            }
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text(result['message']?.toString() ?? 'Operation failed'),
+                                  content: Text(e.toString().replaceFirst('Exception: ', '')),
                                   backgroundColor: AppColors.danger,
                                 ),
                               );
                             }
-                          } catch (e) {
-                            if (!dialogContext.mounted) return;
-                            setDialogState(() {
-                              isSaving = false;
-                            });
-                            ScaffoldMessenger.of(dialogContext).showSnackBar(
-                              SnackBar(
-                                content: Text(e.toString().replaceFirst('Exception: ', '')),
-                                backgroundColor: AppColors.danger,
-                              ),
-                            );
                           }
                         },
                   child: isSaving
@@ -422,8 +458,10 @@ class _ManageBusesScreenState
       },
     );
 
-    busNumberController.dispose();
-    driverController.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      busNumberController.dispose();
+      driverController.dispose();
+    });
 
     if (shouldRefresh == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

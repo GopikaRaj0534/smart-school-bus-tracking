@@ -4,6 +4,7 @@ import 'package:geolocator/geolocator.dart';
 
 import 'package:routesafe/screens/auth/login_screen.dart';
 import 'package:routesafe/screens/driver/driver_security_screen.dart';
+import 'package:routesafe/screens/driver/driver_students_not_riding_screen.dart';
 import 'package:routesafe/services/api_service.dart';
 import 'package:routesafe/utils/app_colors.dart';
 import 'package:routesafe/utils/session_manager.dart';
@@ -938,6 +939,22 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
           _drawerTile(Icons.dashboard, 'Dashboard', 0),
           _drawerTile(Icons.directions_bus, 'My Bus', 1),
           _drawerTile(Icons.people, 'My Students', 2),
+          ListTile(
+            leading: const Icon(Icons.person_off_rounded, color: Colors.orange),
+            title: const Text('Students Not Riding'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => DriverStudentsNotRidingScreen(
+                    driverId: widget.driverId,
+                    driverName: driverName,
+                  ),
+                ),
+              );
+            },
+          ),
           _drawerTile(Icons.map, 'Live Location', 3),
           _drawerTile(Icons.history, 'Trip History', 4),
           _drawerTile(Icons.warning, 'Emergency Reports', 5),

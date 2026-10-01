@@ -70,91 +70,41 @@ class _PendingDriverRequestsScreenState
   // ============================================================
 
   Future<void> _approveDriver(int driverId, String driverName) async {
-    List<Map<String, dynamic>> availableBuses = [];
-    int? selectedBusId;
-
-    try {
-      final res = await ApiService.getBuses();
-      if (res['success'] == true && res['buses'] is List) {
-        availableBuses = List<Map<String, dynamic>>.from(res['buses']);
-        if (availableBuses.isNotEmpty) {
-          selectedBusId = availableBuses[0]['bus_id'] as int?;
-        }
-      }
-    } catch (_) {}
-
-    if (!mounted) return;
-
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (dialogCtx, setDialogState) {
-          return AlertDialog(
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: const Row(
-              children: [
-                Icon(Icons.check_circle_outline,
-                    color: AppColors.success, size: 28),
-                SizedBox(width: 10),
-                Text('Approve Driver'),
-              ],
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Approve registration request for $driverName?',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 14),
-                const Text(
-                  'Select Bus to Assign:',
-                  style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
-                ),
-                const SizedBox(height: 6),
-                DropdownButtonFormField<int>(
-                  initialValue: selectedBusId,
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.directions_bus),
-                    border: OutlineInputBorder(),
-                  ),
-                  items: availableBuses.map((b) {
-                    final id = b['bus_id'] as int;
-                    final busNum = b['bus_number']?.toString() ?? 'Bus #$id';
-                    final route = b['route']?.toString() ?? 'Route';
-                    return DropdownMenuItem<int>(
-                      value: id,
-                      child: Text('$busNum ($route)'),
-                    );
-                  }).toList(),
-                  onChanged: (val) {
-                    setDialogState(() {
-                      selectedBusId = val;
-                    });
-                  },
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogCtx, false),
-                child: const Text('Cancel'),
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.check_circle_outline, color: AppColors.success, size: 28),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Assign Driver',
+                overflow: TextOverflow.ellipsis,
               ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.success,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                ),
-                onPressed: () => Navigator.pop(dialogCtx, true),
-                child: const Text('Approve & Assign Bus'),
-              ),
-            ],
-          );
-        },
+            ),
+          ],
+        ),
+        content: Text(
+          'Assign registration request for $driverName?',
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.success,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Approve'),
+          ),
+        ],
       ),
     );
 
@@ -163,7 +113,6 @@ class _PendingDriverRequestsScreenState
     try {
       final result = await ApiService.approveDriver(
         driverId: driverId,
-        busId: selectedBusId,
       );
 
       if (!mounted) return;
@@ -460,9 +409,14 @@ class _PendingDriverRequestsScreenState
                       const Icon(Icons.email_outlined,
                           size: 16, color: AppColors.textSecondary),
                       const SizedBox(width: 8),
-                      Text(email,
+                      Expanded(
+                        child: Text(
+                          email,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              fontSize: 13, color: AppColors.textPrimary)),
+                              fontSize: 13, color: AppColors.textPrimary),
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -471,9 +425,14 @@ class _PendingDriverRequestsScreenState
                       const Icon(Icons.phone_outlined,
                           size: 16, color: AppColors.textSecondary),
                       const SizedBox(width: 8),
-                      Text(phone,
+                      Expanded(
+                        child: Text(
+                          phone,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              fontSize: 13, color: AppColors.textPrimary)),
+                              fontSize: 13, color: AppColors.textPrimary),
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -482,9 +441,16 @@ class _PendingDriverRequestsScreenState
                       const Icon(Icons.badge_outlined,
                           size: 16, color: AppColors.textSecondary),
                       const SizedBox(width: 8),
-                      Text('License: ${licenseNo.isNotEmpty ? licenseNo : 'Not Provided'}',
+                      Expanded(
+                        child: Text(
+                          'License: ${licenseNo.isNotEmpty ? licenseNo : 'Not Provided'}',
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              fontSize: 13, color: AppColors.textPrimary, fontWeight: FontWeight.w500)),
+                              fontSize: 13,
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w500),
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -514,7 +480,7 @@ class _PendingDriverRequestsScreenState
                           ),
                           onPressed: () => _approveDriver(driverId, fullName),
                           icon: const Icon(Icons.check, size: 18),
-                          label: const Text('Approve & Assign'),
+                          label: const Text('Assign'),
                         ),
                       ),
                     ],

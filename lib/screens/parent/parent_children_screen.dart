@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:routesafe/services/api_service.dart';
 import 'package:routesafe/utils/app_colors.dart';
+import 'package:routesafe/utils/session_manager.dart';
 
 class ParentChildrenScreen extends StatefulWidget {
   final int parentId;
@@ -29,24 +30,38 @@ class _ParentChildrenScreenState extends State<ParentChildrenScreen> {
   Future<void> _loadChildren() async {
     setState(() => _isLoading = true);
     try {
-      final res = await ApiService.getParentDashboard(widget.parentId);
-      if (res['success'] == true && res['children'] is List) {
-        final list = List<Map<String, dynamic>>.from(res['children']);
-        final uniqueChildren = <Map<String, dynamic>>[];
-        final seenIds = <int>{};
-        for (var c in list) {
-          final cid = int.tryParse(c['child_id']?.toString() ?? '');
-          if (cid == null || seenIds.add(cid)) {
-            uniqueChildren.add(c);
+      int targetParentId = widget.parentId;
+      if (targetParentId <= 0) {
+        final sessionUid = await SessionManager.getUserId();
+        if (sessionUid != null && sessionUid > 0) {
+          targetParentId = sessionUid;
+        }
+      }
+
+      if (targetParentId > 0) {
+        final res = await ApiService.getParentDashboard(targetParentId);
+        if (res['success'] == true && res['children'] is List) {
+          final list = List<Map<String, dynamic>>.from(res['children']);
+          final uniqueChildren = <Map<String, dynamic>>[];
+          final seenIds = <int>{};
+          for (var c in list) {
+            final cid = int.tryParse(c['child_id']?.toString() ?? '');
+            if (cid == null || seenIds.add(cid)) {
+              uniqueChildren.add(c);
+            }
+          }
+          if (mounted) {
+            setState(() {
+              _children = uniqueChildren;
+              _isLoading = false;
+            });
+            return;
           }
         }
-        setState(() {
-          _children = uniqueChildren;
-          _isLoading = false;
-        });
-        return;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('ParentChildrenScreen load error: $e');
+    }
 
     if (mounted) {
       setState(() => _isLoading = false);

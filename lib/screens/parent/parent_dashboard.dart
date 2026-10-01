@@ -7,6 +7,7 @@ import 'package:routesafe/screens/parent/parent_live_tracking_screen.dart';
 import 'package:routesafe/screens/parent/parent_notifications_screen.dart';
 import 'package:routesafe/screens/parent/parent_profile_screen.dart';
 import 'package:routesafe/screens/parent/parent_transport_info_screen.dart';
+import 'package:routesafe/screens/parent/parent_travel_status_screen.dart';
 import 'package:routesafe/services/api_service.dart';
 import 'package:routesafe/utils/app_colors.dart';
 import 'package:routesafe/utils/session_manager.dart';
@@ -618,291 +619,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
     }
   }
 
-  Future<void> _confirmMarkAbsent(BuildContext context, int childId, String childName) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: AppColors.warning),
-            SizedBox(width: 8),
-            Text("Confirm Absence"),
-          ],
-        ),
-        content: Text("Is $childName not riding the school bus today?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.warning,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text("Confirm"),
-          ),
-        ],
-      ),
-    );
 
-    if (confirm == true && mounted) {
-      try {
-        final res = await ApiService.markChildAbsent(
-          parentId: widget.parentId!,
-          childId: childId,
-        );
-        if (!mounted) return;
-        if (res['success'] == true) {
-          ScaffoldMessenger.of(this.context).showSnackBar(
-            SnackBar(
-              content: Text(res['message']?.toString() ?? "Child marked as not riding today"),
-              backgroundColor: AppColors.success,
-            ),
-          );
-          _loadDashboardData();
-        } else {
-          ScaffoldMessenger.of(this.context).showSnackBar(
-            SnackBar(
-              content: Text(res['message']?.toString() ?? "Failed to update absence status"),
-              backgroundColor: AppColors.danger,
-            ),
-          );
-        }
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(this.context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: AppColors.danger,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _confirmCancelAbsence(BuildContext context, int childId, String childName) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.directions_bus_rounded, color: AppColors.primary),
-            SizedBox(width: 8),
-            Text("Cancel Absence"),
-          ],
-        ),
-        content: Text("Restore bus pickup for $childName today?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Keep Absent"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text("Confirm"),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true && mounted) {
-      try {
-        final res = await ApiService.cancelChildAbsence(
-          parentId: widget.parentId!,
-          childId: childId,
-        );
-        if (!mounted) return;
-        if (res['success'] == true) {
-          ScaffoldMessenger.of(this.context).showSnackBar(
-            SnackBar(
-              content: Text(res['message']?.toString() ?? "Absence cancelled successfully"),
-              backgroundColor: AppColors.success,
-            ),
-          );
-          _loadDashboardData();
-        } else {
-          ScaffoldMessenger.of(this.context).showSnackBar(
-            SnackBar(
-              content: Text(res['message']?.toString() ?? "Failed to cancel absence"),
-              backgroundColor: AppColors.danger,
-            ),
-          );
-        }
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(this.context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: AppColors.danger,
-          ),
-        );
-      }
-    }
-  }
-
-  Widget _buildAbsenceCard(BuildContext context, Map<String, dynamic> child, int childId, bool isTripStarted) {
-    final bool isAbsent = child['is_absent'] == true || child['bus_today_status'] == 'NOT RIDING TODAY';
-    final String childName = child['child_name']?.toString() ?? 'Child';
-
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: isAbsent ? AppColors.warning : AppColors.success.withOpacityCompat(0.6),
-          width: 1.5,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: isAbsent ? AppColors.warningLight : AppColors.successLight,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    isAbsent ? Icons.event_busy_rounded : Icons.directions_bus_filled_rounded,
-                    color: isAbsent ? AppColors.warning : AppColors.success,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        "Today's Bus Status",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        isAbsent
-                            ? "Not Riding Today"
-                            : "Expected to ride bus today",
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: isAbsent ? AppColors.danger : AppColors.success,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: isAbsent ? AppColors.warningLight : AppColors.successLight,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: isAbsent ? AppColors.warning : AppColors.success,
-                    ),
-                  ),
-                  child: Text(
-                    isAbsent ? "NOT RIDING" : "RIDING TODAY",
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: isAbsent ? AppColors.warning : AppColors.success,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const Divider(height: 20),
-            if (isAbsent) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppColors.warningLight,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.info_outline_rounded, color: AppColors.warning, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        "Driver stop for $childName is set to SKIP today.",
-                        style: const TextStyle(fontSize: 12, color: AppColors.textPrimary),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: isTripStarted ? Colors.grey : AppColors.primary,
-                    side: BorderSide(color: isTripStarted ? Colors.grey : AppColors.primary),
-                    minimumSize: const Size(double.infinity, 42),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  icon: const Icon(Icons.restore_rounded, size: 18),
-                  label: const Text("Cancel Absence (Restore Pickup)"),
-                  onPressed: isTripStarted
-                      ? () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text("The trip has already started. Today's absence can no longer be changed."),
-                              backgroundColor: AppColors.warning,
-                            ),
-                          );
-                        }
-                      : () => _confirmCancelAbsence(context, childId, childName),
-                ),
-              ),
-            ] else ...[
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: isTripStarted ? Colors.grey : AppColors.warning,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size(double.infinity, 42),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  icon: const Icon(Icons.person_off_rounded, size: 18),
-                  label: const Text("Mark Not Riding Today"),
-                  onPressed: isTripStarted
-                      ? () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text("The trip has already started. Today's absence can no longer be changed."),
-                              backgroundColor: AppColors.warning,
-                            ),
-                          );
-                        }
-                      : () => _confirmMarkAbsent(context, childId, childName),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1137,11 +854,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
                       const SizedBox(height: 16),
                     ],
 
-                    // TODAY'S BUS STATUS & ABSENCE MANAGEMENT CARD
-                    if (selectedChild != null && activeChildId != null) ...[
-                      _buildAbsenceCard(context, selectedChild, activeChildId, _isLiveTripActive || (selectedChild['trip_started'] == true)),
-                      const SizedBox(height: 16),
-                    ],
+
 
                     // BOARDING STATUS ALERT BANNER
                     if (selectedChild != null) ...[
@@ -1666,6 +1379,26 @@ class _ParentDashboardState extends State<ParentDashboard> {
                   ),
                 );
               }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.event_note_rounded, color: AppColors.accentYellow),
+            title: const Text("Travel Status"),
+            onTap: () async {
+              Navigator.pop(context);
+              int pid = widget.parentId ?? 0;
+              if (pid <= 0) {
+                pid = await SessionManager.getUserId() ?? 0;
+              }
+              if (!mounted) return;
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ParentTravelStatusScreen(
+                    parentId: pid,
+                  ),
+                ),
+              ).then((_) => _loadDashboardData(silent: true));
             },
           ),
           ListTile(

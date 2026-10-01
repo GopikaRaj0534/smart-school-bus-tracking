@@ -24,6 +24,7 @@ class AppColors {
   static const Color warningLight = Color(0xFFFFFBEB);
   static const Color danger = Color(0xFFDC2626); // Crimson Red
   static const Color dangerLight = Color(0xFFFEF2F2);
+  static const Color info = Color(0xFF0284C7); // Electric Sky Cyan
 
   // Surface & Neutrals
   static const Color background = Color(0xFFF8FAFC); // Clean Slate Background

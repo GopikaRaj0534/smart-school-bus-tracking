@@ -1,3 +1,4 @@
+import secrets
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import mysql.connector
@@ -27,419 +28,108 @@ CORS(app)
 
 
 # ============================================================
-# ============================================================
-# DATABASE CONFIGURATION
+# DATABASE CONFIGURATION & RESILIENT FALLBACK WRAPPER
 # ============================================================
 
-DB_CONFIG = {
-    "host": os.environ.get("DB_HOST", os.environ.get("MYSQL_HOST", "localhost")),
-    "port": int(os.environ.get("DB_PORT", os.environ.get("MYSQL_PORT", "3306"))),
-    "user": os.environ.get("DB_USER", os.environ.get("MYSQL_USER", "root")),
-    "password": os.environ.get("DB_PASSWORD", os.environ.get("MYSQL_PASSWORD", "")),
-    "database": os.environ.get("DB_NAME", os.environ.get("MYSQL_DATABASE", "defaultdb"))
-}
+import sqlite3
 
-# Support optional SSL CA certificate / SSL configuration if required by cloud provider (e.g. Aiven)
-ssl_disabled = os.environ.get("DB_SSL_DISABLED", "").lower() in ("true", "1", "yes")
-if not ssl_disabled:
-    ssl_ca = os.environ.get("DB_SSL_CA")
-    if ssl_ca:
-        DB_CONFIG["ssl_ca"] = ssl_ca
+class SQLiteDictCursor:
+    def __init__(self, conn):
+        self.conn = conn
+        self.cursor = conn.cursor()
+        self.description = None
+        self.lastrowid = None
+        self.rowcount = 0
+
+    def execute(self, query, params=None):
+        sqlite_query = query.replace('%s', '?').replace('NOW()', "datetime('now')").replace('now()', "datetime('now')")
+        if params is None:
+            self.cursor.execute(sqlite_query)
+        else:
+            if isinstance(params, dict):
+                self.cursor.execute(sqlite_query, params)
+            else:
+                self.cursor.execute(sqlite_query, tuple(params))
+        self.description = self.cursor.description
+        self.lastrowid = self.cursor.lastrowid
+        self.rowcount = self.cursor.rowcount
+        return self
+
+    def fetchone(self):
+        row = self.cursor.fetchone()
+        if row is None:
+            return None
+        columns = [desc[0] for desc in self.description]
+        return dict(zip(columns, row))
+
+    def fetchall(self):
+        rows = self.cursor.fetchall()
+        if not rows:
+            return []
+        columns = [desc[0] for desc in self.description]
+        return [dict(zip(columns, row)) for row in rows]
+
+    def close(self):
+        self.cursor.close()
+
+class SQLiteConnectionWrapper:
+    def __init__(self, db_path='routesafe.db'):
+        self.db_path = db_path
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+
+    def cursor(self, dictionary=True, buffered=True):
+        return SQLiteDictCursor(self.conn)
+
+    def commit(self):
+        self.conn.commit()
+
+    def rollback(self):
+        self.conn.rollback()
+
+    def close(self):
+        self.conn.close()
+
+    def is_connected(self):
+        return True
 
 
-# ============================================================
-# DATABASE CONNECTION & AUTOMATIC TABLE INITIALIZATION
-# ============================================================
+def get_db_config():
+    raw_host = os.environ.get("DB_HOST", "localhost").strip()
+    clean_host = raw_host.replace(" ", "")
+    return {
+        "host": clean_host if clean_host else "localhost",
+        "port": int(os.environ.get("DB_PORT", "3306")),
+        "user": os.environ.get("MYSQL_USER", os.environ.get("DB_USER", "root")),
+        "password": os.environ.get("MYSQL_PASSWORD", os.environ.get("DB_PASSWORD", "")),
+        "database": os.environ.get("MYSQL_DATABASE", os.environ.get("DB_NAME", "routesafe_db"))
+    }
+
 
 def get_db():
-    conn = None
+    config = get_db_config()
+    # 1. Try configured MySQL host
     try:
-        conn = mysql.connector.connect(**DB_CONFIG)
-    except mysql.connector.Error as e:
-        if DB_CONFIG.get("host") in ("localhost", "127.0.0.1"):
-            try:
-                local_config = {
-                    "host": "localhost",
-                    "port": 3306,
-                    "user": "root",
-                    "password": "",
-                    "database": os.environ.get("DB_NAME", os.environ.get("MYSQL_DATABASE", "defaultdb"))
-                }
-                conn = mysql.connector.connect(**local_config)
-            except mysql.connector.Error:
-                pass
-        if not conn:
-            raise e
-
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))")
-        cursor.close()
-    except Exception:
-        pass
-    return conn
-
-
-_tables_ensured = False
-
-def ensure_all_tables():
-    global _tables_ensured
-    if _tables_ensured:
-        return
-    conn = None
-    cursor = None
-    try:
-        conn = get_db()
-        cursor = conn.cursor()
-
-        # 1. users
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `users` (
-              `user_id` int(11) NOT NULL AUTO_INCREMENT,
-              `full_name` varchar(100) NOT NULL,
-              `email` varchar(100) NOT NULL,
-              `phone` varchar(15) DEFAULT NULL,
-              `license_number` varchar(50) DEFAULT NULL,
-              `password` varchar(255) NOT NULL,
-              `role` enum('Admin','Driver','Parent') NOT NULL,
-              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-              `status` varchar(20) NOT NULL DEFAULT 'APPROVED',
-              `rejection_reason` text DEFAULT NULL,
-              `account_status` varchar(20) NOT NULL DEFAULT 'APPROVED',
-              PRIMARY KEY (`user_id`),
-              UNIQUE KEY `email` (`email`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        cursor.execute("""
-            INSERT IGNORE INTO `users` (`user_id`, `full_name`, `email`, `phone`, `license_number`, `password`, `role`, `created_at`, `status`, `rejection_reason`, `account_status`) VALUES
-            (2, 'Anupama', 'anu@gmail.com', '9876543210', NULL, '123456', 'Parent', NOW(), 'APPROVED', NULL, 'APPROVED'),
-            (4, 'Admin', 'admin@gmail.com', '7890766754', NULL, 'scrypt:32768:8:1$Iw2qTbtdoBGRiV0T$f3d8d89a74e9e4ef3c349e91170639dc4fcb7ad2ffdf2506e66a716df7171423ed63bad08c4eace3e152001a1fb5c9c3d966dda68f59f7d1f2954431d4f83673', 'Admin', NOW(), 'APPROVED', NULL, 'APPROVED'),
-            (6, 'Ben', 'ben@gmail.com', '8765432134', NULL, 'scrypt:32768:8:1$sBOXazdP7syQ40W6$683205c914e6ab3652f31ad0bd87167e932450fc7f9ca936919fe604a807ec439da1a42b485ee70fedef2eced6d74cb6a0c60a81af85f1d8af1cbdd7b318c9b2', 'Driver', NOW(), 'APPROVED', NULL, 'APPROVED'),
-            (7, 'Ann', 'ann@gmail.com', '6789543213', NULL, 'ann123', 'Parent', NOW(), 'APPROVED', NULL, 'APPROVED'),
-            (8, 'Anil', 'anil@gmail.com', '9789318024', NULL, 'anil123', 'Driver', NOW(), 'APPROVED', NULL, 'APPROVED'),
-            (15, 'Anju', 'anju@gmail.com', '8768906543', NULL, 'scrypt:32768:8:1$RwpyDqOqEB34xFD4$befaf4c69f0f348fa02b0123f0eea70b8148664edfc7f76fba16186b4a6b38819551f0d3355afbf77f013607c84d7db328e7e90edfa51c1120e44181400e6271', 'Parent', NOW(), 'APPROVED', NULL, 'APPROVED'),
-            (25, 'Anoop', 'anoop@gmail.com', '9087567890', NULL, 'scrypt:32768:8:1$waOlxep9HhBONwfa$9830397ada637cb4a3749decb9e1120c90fd6c31aba2bc37f1a5e0b9d4af44679daa7daed53d8e8faa6851101dfaa3321a2033f66de9a41917adaed89830a3e7', 'Driver', NOW(), 'APPROVED', NULL, 'APPROVED'),
-            (40, 'Benit', 'benit@gmail.com', '8590528843', NULL, 'scrypt:32768:8:1$m048mYSLrcSFB4ef$f86460d0d3e95b6a087fca28a44c0fd27e0a1cb2809eb847c4741b44ee448bed901da27369a2778f9198aab161cc6710d102a701e4ec5ec811b9118abfefdd65', 'Driver', NOW(), 'APPROVED', NULL, 'APPROVED'),
-            (41, 'Gowri', 'gowri@gmail.com', '9087654326', NULL, 'scrypt:32768:8:1$rwPMseLlNeQ57kBB$84cdc289c772c199e7054b7fb9dd3b10eb709eb0cc36c1d544d9fd0f72db6143154374d3892461fe193b8829be243c80b1837f8fbb69b0539ecf9018dcd3f8c6', 'Parent', NOW(), 'APPROVED', NULL, 'APPROVED'),
-            (64, 'Gayathri', 'gayathri@gmail.com', '9072928621', NULL, 'scrypt:32768:8:1$WqgkwhJEPi8dro3y$a602673658f787dab7ce00120608d80f990bab6826defc31e781952b6aa1ad57c93418186550cab19d3a2aad46d50f3fa51663f071abea56c450f38a4dab4ca1', 'Parent', NOW(), 'APPROVED', NULL, 'APPROVED'),
-            (65, 'Cincy', 'cincy@gmail.com', '9847123456', NULL, 'scrypt:32768:8:1$fnjRDJPWP3RQigrb$5ec1d9ef09e08b11f955023230c40cad35c16fd243bf8deece352fb0417b923d3bb4c33a8cfd8a58ca2c9044f6c78f769a11615764cff772466a9accbd653403', 'Parent', NOW(), 'APPROVED', NULL, 'APPROVED'),
-            (66, 'Soman', 'soman@gmail.com', '9072928621', NULL, 'scrypt:32768:8:1$JNZCG3BWWGlP1PHf$c7f57360f83748892956b7d7aad262ce40533d6256adefaf3e6ebd55679dd6c63396226c95b8928019c39d25b0a92ecbdc8438f095440e9eaf62a1ee13d725e1', 'Driver', NOW(), 'APPROVED', NULL, 'APPROVED');
-        """)
-
-        # 2. routes
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `routes` (
-              `route_id` int(11) NOT NULL AUTO_INCREMENT,
-              `route_name` varchar(100) NOT NULL,
-              PRIMARY KEY (`route_id`),
-              UNIQUE KEY `route_name` (`route_name`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        cursor.execute("""
-            INSERT IGNORE INTO `routes` (`route_id`, `route_name`) VALUES
-            (2, 'Alappuzha'), (1, 'Chengannur'), (3, 'Edathua'), (8, 'Elanthoor'), (4, 'Kadapra'), (11, 'Kanjirapally'),
-            (10, 'Kayamkulam'), (14, 'Kottayam'), (13, 'Kumarakom'), (7, 'Mallappally'), (5, 'Mavelikara'), (9, 'Pala'), (12, 'Puramattom'), (6, 'Thiruvalla');
-        """)
-
-        # 3. pickup_stops
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `pickup_stops` (
-              `stop_id` int(11) NOT NULL AUTO_INCREMENT,
-              `route_id` int(11) NOT NULL,
-              `stop_name` varchar(100) NOT NULL,
-              `stop_order` int(11) DEFAULT 1,
-              `latitude` decimal(10,7) DEFAULT NULL,
-              `longitude` decimal(10,7) DEFAULT NULL,
-              PRIMARY KEY (`stop_id`),
-              KEY `route_id` (`route_id`),
-              CONSTRAINT `pickup_stops_ibfk_1` FOREIGN KEY (`route_id`) REFERENCES `routes` (`route_id`) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        cursor.execute("""
-            INSERT IGNORE INTO `pickup_stops` (`stop_id`, `route_id`, `stop_name`, `stop_order`, `latitude`, `longitude`) VALUES
-            (1, 1, 'Chengannur Town', 1, 9.3151000, 76.6151000),
-            (2, 1, 'College Junction', 2, 9.3200000, 76.6200000),
-            (3, 1, 'Market Stop', 3, 9.3250000, 76.6250000),
-            (7, 2, 'Alappuzha Railway Station', 1, 9.4900000, 76.3260000),
-            (8, 2, 'Alappuzha KSRTC', 2, 9.4981000, 76.3388000),
-            (9, 2, 'Kommady', 3, 9.5050000, 76.3300000),
-            (10, 3, 'Edathua Church', 1, 9.3640000, 76.4750000),
-            (11, 3, 'Edathua Junction', 2, 9.3650000, 76.4755000),
-            (12, 3, 'Thalavady', 3, 9.3730000, 76.5100000),
-            (13, 4, 'Kadapra Junction', 1, 9.4000000, 76.5650000),
-            (14, 4, 'Parumala', 2, 9.3850000, 76.5750000),
-            (15, 4, 'Mannar', 3, 9.3230000, 76.5480000),
-            (16, 5, 'Mavelikara Railway Station', 1, 9.2600000, 76.5560000),
-            (17, 5, 'Mavelikara KSRTC', 2, 9.2605000, 76.5565000),
-            (18, 5, 'Kandiyoor', 3, 9.2450000, 76.5600000),
-            (19, 6, 'Thiruvalla Railway Station', 1, 9.3820000, 76.5740000),
-            (20, 6, 'Thiruvalla KSRTC', 2, 9.3810000, 76.5745000),
-            (21, 6, 'Ramanchira', 3, 9.3850000, 76.5750000),
-            (22, 9, 'Pala Town', 1, 9.7050000, 76.6850000),
-            (23, 9, 'Pala Bus Stand', 2, 9.7030000, 76.6855000),
-            (24, 9, 'Meenachil', 3, 9.6900000, 76.7100000),
-            (25, 14, 'Kottayam', 1, 9.5916000, 76.5222000),
-            (26, 14, 'Nattakom', 2, 9.5556000, 76.5137000),
-            (27, 14, 'Chingavanam', 3, 9.5248000, 76.5247000),
-            (28, 14, 'Pathamuttom', 4, 9.5004000, 76.5519000),
-            (29, 14, 'Saintgits College', 5, 9.5100000, 76.5514000),
-            (30, 14, 'Saintgits College of Engineering', 6, 9.5092100, 76.5518300);
-        """)
-
-        # 4. buses
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `buses` (
-              `bus_id` int(11) NOT NULL AUTO_INCREMENT,
-              `bus_number` varchar(50) NOT NULL,
-              `registration_number` varchar(50) DEFAULT NULL,
-              `route` varchar(150) NOT NULL,
-              `driver_name` varchar(100) DEFAULT NULL,
-              `status` varchar(20) DEFAULT 'Active',
-              `start_point` varchar(100) DEFAULT NULL,
-              `destination` varchar(100) DEFAULT NULL,
-              `driver_id` int(11) DEFAULT NULL,
-              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-              PRIMARY KEY (`bus_id`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        cursor.execute("""
-            INSERT IGNORE INTO `buses` (`bus_id`, `bus_number`, `registration_number`, `route`, `driver_name`, `status`, `start_point`, `destination`, `driver_id`, `created_at`) VALUES
-            (3, '11', NULL, 'Chengannur', 'Quality Driver', 'Active', NULL, NULL, 62, NOW()),
-            (4, '12', NULL, 'Pala', 'Anil', 'Active', NULL, NULL, 8, NOW()),
-            (6, '1', NULL, 'Thiruvalla', 'Benit', 'Active', NULL, NULL, 40, NOW()),
-            (7, '10', NULL, 'Chengannur', 'Ben', 'Active', NULL, NULL, 6, NOW()),
-            (8, '14', 'KL-05-AB-1414', 'Kottayam', 'Soman', 'Active', NULL, NULL, 66, NOW());
-        """)
-
-        # 5. parent_children
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `parent_children` (
-              `child_id` int(11) NOT NULL AUTO_INCREMENT,
-              `parent_id` int(11) NOT NULL,
-              `child_name` varchar(100) NOT NULL,
-              `bus_id` int(11) DEFAULT NULL,
-              `route_id` int(11) DEFAULT NULL,
-              `pickup_stop_id` int(11) DEFAULT NULL,
-              `class_name` varchar(50) DEFAULT NULL,
-              PRIMARY KEY (`child_id`),
-              KEY `parent_id` (`parent_id`),
-              KEY `fk_child_bus` (`bus_id`),
-              KEY `fk_child_route` (`route_id`),
-              CONSTRAINT `fk_child_bus` FOREIGN KEY (`bus_id`) REFERENCES `buses` (`bus_id`) ON DELETE SET NULL,
-              CONSTRAINT `fk_child_route` FOREIGN KEY (`route_id`) REFERENCES `routes` (`route_id`) ON DELETE SET NULL,
-              CONSTRAINT `parent_children_ibfk_1` FOREIGN KEY (`parent_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        cursor.execute("""
-            INSERT IGNORE INTO `parent_children` (`child_id`, `parent_id`, `child_name`, `bus_id`, `route_id`, `pickup_stop_id`, `class_name`) VALUES
-            (4, 15, 'Anjali', 6, 1, 1, '8'),
-            (24, 65, 'Aneena', 8, 14, 30, '10th A');
-        """)
-
-        # 6. student_boarding
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `student_boarding` (
-              `attendance_id` int(11) NOT NULL AUTO_INCREMENT,
-              `child_id` int(11) NOT NULL,
-              `bus_id` int(11) NOT NULL,
-              `driver_id` int(11) NOT NULL,
-              `trip_id` int(11) DEFAULT NULL,
-              `attendance_date` date NOT NULL,
-              `boarding_status` enum('Not Boarded','Boarded','Dropped Off') DEFAULT 'Not Boarded',
-              `boarding_time` time DEFAULT NULL,
-              `drop_off_status` enum('Pending','Dropped Off') DEFAULT 'Pending',
-              `drop_off_time` time DEFAULT NULL,
-              `stop_id` int(11) DEFAULT NULL,
-              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-              PRIMARY KEY (`attendance_id`),
-              UNIQUE KEY `unique_daily_child` (`child_id`,`attendance_date`,`bus_id`),
-              KEY `bus_id` (`bus_id`),
-              KEY `driver_id` (`driver_id`),
-              CONSTRAINT `student_boarding_ibfk_1` FOREIGN KEY (`child_id`) REFERENCES `parent_children` (`child_id`) ON DELETE CASCADE,
-              CONSTRAINT `student_boarding_ibfk_2` FOREIGN KEY (`bus_id`) REFERENCES `buses` (`bus_id`) ON DELETE CASCADE,
-              CONSTRAINT `student_boarding_ibfk_3` FOREIGN KEY (`driver_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        # 7. driver_trips
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `driver_trips` (
-              `trip_id` int(11) NOT NULL AUTO_INCREMENT,
-              `driver_id` int(11) NOT NULL,
-              `bus_id` int(11) DEFAULT NULL,
-              `start_time` datetime DEFAULT NULL,
-              `end_time` datetime DEFAULT NULL,
-              `status` varchar(20) NOT NULL DEFAULT 'Not Started',
-              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-              PRIMARY KEY (`trip_id`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        # 8. driver_locations
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `driver_locations` (
-              `location_id` int(11) NOT NULL AUTO_INCREMENT,
-              `driver_id` int(11) NOT NULL,
-              `latitude` decimal(10,7) NOT NULL,
-              `longitude` decimal(10,7) NOT NULL,
-              `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-              PRIMARY KEY (`location_id`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        # 9. driver_emergencies
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `driver_emergencies` (
-              `emergency_id` int(11) NOT NULL AUTO_INCREMENT,
-              `driver_id` int(11) NOT NULL,
-              `emergency_type` varchar(50) DEFAULT 'Other',
-              `message` text NOT NULL,
-              `latitude` double DEFAULT NULL,
-              `longitude` double DEFAULT NULL,
-              `bus_id` int(11) DEFAULT NULL,
-              `status` varchar(20) NOT NULL DEFAULT 'Pending',
-              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-              PRIMARY KEY (`emergency_id`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        # 10. parent_registration_requests
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `parent_registration_requests` (
-              `request_id` int(11) NOT NULL AUTO_INCREMENT,
-              `full_name` varchar(100) NOT NULL,
-              `email` varchar(150) NOT NULL,
-              `phone` varchar(20) DEFAULT NULL,
-              `password` varchar(255) NOT NULL,
-              `child_name` varchar(100) NOT NULL,
-              `child_class` varchar(50) DEFAULT NULL,
-              `status` enum('PENDING','APPROVED','REJECTED') DEFAULT 'PENDING',
-              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-              PRIMARY KEY (`request_id`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        # 11. driver_phone_otp
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `driver_phone_otp` (
-              `otp_id` int(11) NOT NULL AUTO_INCREMENT,
-              `driver_id` int(11) NOT NULL,
-              `new_phone` varchar(20) NOT NULL,
-              `otp_hash` varchar(255) NOT NULL,
-              `expires_at` datetime NOT NULL,
-              `attempts` int(11) DEFAULT 0,
-              `verified` tinyint(1) DEFAULT 0,
-              `created_at` datetime DEFAULT current_timestamp(),
-              PRIMARY KEY (`otp_id`),
-              KEY `driver_id` (`driver_id`),
-              CONSTRAINT `driver_phone_otp_ibfk_1` FOREIGN KEY (`driver_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        # 12. assignment_logs
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `assignment_logs` (
-              `log_id` int(11) NOT NULL AUTO_INCREMENT,
-              `entity_type` varchar(50) NOT NULL,
-              `entity_id` int(11) DEFAULT NULL,
-              `action` varchar(50) NOT NULL,
-              `details` text DEFAULT NULL,
-              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-              PRIMARY KEY (`log_id`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        # 13. child_bus_absence
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `child_bus_absence` (
-              `absence_id` int(11) NOT NULL AUTO_INCREMENT,
-              `child_id` int(11) NOT NULL,
-              `parent_id` int(11) NOT NULL,
-              `route_id` int(11) DEFAULT NULL,
-              `stop_id` int(11) DEFAULT NULL,
-              `absence_date` date NOT NULL,
-              `status` varchar(50) NOT NULL DEFAULT 'Not Riding Today',
-              `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-              `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-              PRIMARY KEY (`absence_id`),
-              UNIQUE KEY `unique_child_daily_absence` (`child_id`,`absence_date`),
-              KEY `fk_absence_child` (`child_id`),
-              KEY `fk_absence_parent` (`parent_id`),
-              CONSTRAINT `fk_absence_child` FOREIGN KEY (`child_id`) REFERENCES `parent_children` (`child_id`) ON DELETE CASCADE,
-              CONSTRAINT `fk_absence_parent` FOREIGN KEY (`parent_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        # 14. school_settings
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `school_settings` (
-              `id` int(11) NOT NULL AUTO_INCREMENT,
-              `school_name` varchar(255) NOT NULL,
-              `address` text NOT NULL,
-              `latitude` double NOT NULL,
-              `longitude` double NOT NULL,
-              `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-              PRIMARY KEY (`id`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-        """)
-
-        cursor.execute("SELECT id FROM school_settings LIMIT 1")
-        if not cursor.fetchone():
-            cursor.execute("""
-                INSERT INTO school_settings (id, school_name, address, latitude, longitude)
-                VALUES (1, %s, %s, %s, %s)
-            """, (
-                "Saintgits College of Applied Sciences",
-                "Kottukulam Hills, Pathamuttom P.O., Kottayam, Kerala – 686532",
-                9.50921,
-                76.55183
-            ))
-
-        conn.commit()
-        _tables_ensured = True
+        return mysql.connector.connect(**config)
     except Exception as e:
-        print(f"Table auto-initialization note: {e}")
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
+        print(f"[DATABASE NOTICE] Primary DB connection to {config.get('host')}:{config.get('port')} failed: {e}")
 
-def ensure_school_table():
-    ensure_all_tables()
+    # 2. Try local MySQL (localhost / 127.0.0.1)
+    if config.get("host") not in ("localhost", "127.0.0.1"):
+        try:
+            local_config = {
+                "host": "127.0.0.1",
+                "port": 3306,
+                "user": os.environ.get("MYSQL_USER", os.environ.get("DB_USER", "root")),
+                "password": os.environ.get("MYSQL_PASSWORD", os.environ.get("DB_PASSWORD", "")),
+                "database": os.environ.get("MYSQL_DATABASE", os.environ.get("DB_NAME", "routesafe_db"))
+            }
+            return mysql.connector.connect(**local_config)
+        except Exception as local_err:
+            print(f"[DATABASE NOTICE] Local MySQL connection failed: {local_err}")
 
-def ensure_absence_table():
-    ensure_all_tables()
-
-
-def get_current_school_settings():
-    ensure_school_table()
-    conn = None
-    cursor = None
-    default_school = {
-        "id": 1,
-        "school_name": "Saintgits College of Applied Sciences",
-        "address": "Kottukulam Hills, Pathamuttom P.O., Kottayam, Kerala – 686532",
-        "latitude": 9.50921,
-        "longitude": 76.55183
-    }
-    try:
-        conn = get_db()
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM school_settings ORDER BY id ASC LIMIT 1")
-        row = cursor.fetchone()
-        if row:
-            return serialize_row(row)
-    except Exception as e:
-        print(f"Error fetching school settings: {e}")
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
-    return default_school
-
+    # 3. Fallback to resilient RouteSafe production SQLite fallback database
+    print("[DATABASE NOTICE] Utilizing resilient RouteSafe production SQLite fallback database.")
+    return SQLiteConnectionWrapper('routesafe.db')
 
 
 # ============================================================
@@ -484,11 +174,6 @@ def normalize_role(role):
     role = str(role or "").strip()
 
     return role_map.get(role.lower(), role)
-
-
-@app.before_request
-def auto_init_tables():
-    ensure_all_tables()
 
 
 # ============================================================
@@ -716,10 +401,10 @@ def register():
 
         cursor.execute(
             """
-            INSERT INTO users (full_name, email, phone, password, role, status)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO users (full_name, email, phone, password, role, status, account_status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
-            (full_name, email, phone, hashed_password, role, account_status)
+            (full_name, email, phone, hashed_password, role, account_status, account_status)
         )
         parent_id = cursor.lastrowid
 
@@ -740,7 +425,7 @@ def register():
 
         conn.commit()
 
-        if role == "Parent":
+        if role in ["Parent", "Driver"]:
 
             return jsonify({
                 "success": True,
@@ -865,13 +550,14 @@ def login():
                 role,
                 status
             FROM users
-            WHERE LOWER(TRIM(email)) = LOWER(TRIM(%s))
+            WHERE LOWER(TRIM(email)) = LOWER(TRIM(%s)) OR LOWER(TRIM(full_name)) = LOWER(TRIM(%s))
             LIMIT 1
             """,
-            (email,)
+            (email, email)
         )
 
         user = cursor.fetchone()
+        print(f"DEBUG LOGIN: input='{email}', found_user={user['email'] if user else None}")
 
         if not user:
 
@@ -898,8 +584,8 @@ def login():
 
                 return jsonify({
                     "success": False,
-                    "message": "Invalid username or password"
-                }), 401
+                    "message": f"This account is registered as a {database_role}. Please select the {database_role} tab to log in."
+                }), 400
 
         # ----------------------------------------------------
         # DRIVER APPROVAL & BUS ASSIGNMENT CHECK
@@ -925,7 +611,7 @@ def login():
                     "user": serialize_row(user)
                 }), 403
 
-            if database_status not in ["APPROVED", "ACTIVE"]:
+            if database_status != "APPROVED":
 
                 return jsonify({
                     "success": False,
@@ -938,11 +624,10 @@ def login():
                 """
                 SELECT bus_id, bus_number
                 FROM buses
-                WHERE driver_id = %s OR LOWER(TRIM(driver_name)) = LOWER(TRIM(%s))
-                LIMIT 1
+                WHERE LOWER(TRIM(driver_name))= LOWER(TRIM(%s))LIMIT 1
                 """,
-                (user["user_id"], user["full_name"])
-            )
+                (user["full_name"],)
+        )
 
             assigned_bus = cursor.fetchone()
 
@@ -976,7 +661,7 @@ def login():
                     "status": "REJECTED"
                 }), 403
 
-            if database_status not in ["APPROVED", "ACTIVE"]:
+            if database_status != "APPROVED":
 
                 return jsonify({
                     "success": False,
@@ -1022,6 +707,11 @@ def login():
         user.pop("password", None)
         
 
+        user = serialize_row(user)
+
+
+        # Never send password to Flutter
+        user.pop("password", None)
         user = serialize_row(user)
 
         print("LOGIN SUCCESS")
@@ -1078,13 +768,13 @@ def get_parent_requests():
         cursor.execute(
             """
             SELECT
-                COALESCE(MIN(pr.request_id), u.user_id) AS request_id,
+                COALESCE(pr.request_id, u.user_id) AS request_id,
                 u.user_id,
                 u.full_name,
                 u.email,
                 u.phone,
-                COALESCE(MIN(pr.child_name), MIN(pc.child_name), 'Not provided') AS child_name,
-                COALESCE(MIN(pr.child_class), MIN(pc.class_name), 'Not provided') AS child_class,
+                COALESCE(pr.child_name, pc.child_name, 'Not provided') AS child_name,
+                COALESCE(pr.child_class, pc.class_name, 'Not provided') AS child_class,
                 u.status,
                 u.created_at
             FROM users u
@@ -1094,7 +784,7 @@ def get_parent_requests():
                 ON u.user_id = pc.parent_id
             WHERE u.role = 'Parent'
               AND (UPPER(TRIM(u.status)) = 'PENDING' OR (pr.status IS NOT NULL AND UPPER(TRIM(pr.status)) = 'PENDING'))
-            GROUP BY u.user_id, u.full_name, u.email, u.phone, u.status, u.created_at
+            GROUP BY u.user_id
             ORDER BY u.created_at DESC
             """
         )
@@ -1469,29 +1159,43 @@ def get_routes():
 # ============================================================
 
 @app.route("/buses", methods=["GET"])
+@app.route("/buses/available", methods=["GET"])
+@app.route("/admin/buses/available", methods=["GET"])
 def get_buses():
 
     conn = None
     cursor = None
 
     try:
+        available_only = request.args.get("available_only", "").lower() in ("true", "1", "yes") or "available" in request.path
 
         conn = get_db()
         cursor = conn.cursor(dictionary=True)
 
-        cursor.execute(
-            """
+        query = """
             SELECT
-                bus_id,
-                bus_number,
-                route,
-                driver_name,
-                status
-            FROM buses
-            ORDER BY bus_id DESC
-            """
-)
-        
+                b.bus_id,
+                b.bus_number,
+                b.route,
+                b.registration_number,
+                b.driver_id,
+                COALESCE(u.full_name, b.driver_name, 'Not Assigned') AS driver_name,
+                b.status,
+                CASE
+                    WHEN (b.driver_id IS NULL OR b.driver_id = 0 OR u.user_id IS NULL)
+                         AND (b.driver_name IS NULL OR TRIM(b.driver_name) = '' OR LOWER(TRIM(b.driver_name)) IN ('not assigned', 'unassigned'))
+                    THEN 1 ELSE 0
+                END AS is_available
+            FROM buses b
+            LEFT JOIN users u ON (b.driver_id = u.user_id OR (b.driver_name IS NOT NULL AND LOWER(TRIM(b.driver_name)) = LOWER(TRIM(u.full_name)))) AND u.role = 'Driver' AND u.status = 'APPROVED'
+        """
+        if available_only:
+            query += """ WHERE ((b.driver_id IS NULL OR b.driver_id = 0 OR u.user_id IS NULL)
+                           AND (b.driver_name IS NULL OR TRIM(b.driver_name) = '' OR LOWER(TRIM(b.driver_name)) IN ('not assigned', 'unassigned')))
+                           AND (b.status IS NULL OR b.status = 'Active')"""
+        query += " ORDER BY b.bus_id DESC"
+
+        cursor.execute(query)
         buses = cursor.fetchall()
 
         return jsonify({
@@ -1585,19 +1289,42 @@ def add_bus():
                 "message": "Bus number already exists"
             }), 409
 
+        # Resolve driver_id if driver_name matches an existing driver
+        driver_id = None
+        final_driver_name = driver_name if driver_name else 'Not Assigned'
+        if driver_name and driver_name.lower() not in ("not assigned", "unassigned"):
+            cursor.execute(
+                "SELECT user_id FROM users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(%s)) AND role = 'Driver' LIMIT 1",
+                (driver_name,)
+            )
+            d_row = cursor.fetchone()
+            if d_row:
+                driver_id = d_row["user_id"]
+
         cursor.execute(
             """
-            INSERT INTO buses (bus_number, route, driver_name, status)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO buses (bus_number, route, driver_name, driver_id, status)
+            VALUES (%s, %s, %s, %s, %s)
             """,
-            (bus_number, route, driver_name, status)
+            (bus_number, route, final_driver_name, driver_id, status)
         )
         conn.commit()
+
+        new_bus_id = cursor.lastrowid
 
         return jsonify({
             "success": True,
             "message": "Bus added successfully",
-            "bus_id": cursor.lastrowid
+            "bus_id": new_bus_id,
+            "bus": {
+                "bus_id": new_bus_id,
+                "bus_number": bus_number,
+                "route": route,
+                "driver_name": final_driver_name,
+                "driver_id": driver_id,
+                "status": status,
+                "is_available": 1 if driver_id is None else 0
+            }
         }), 201
 
     except mysql.connector.Error as e:
@@ -1661,15 +1388,26 @@ def update_bus(bus_id):
             }), 400
 
         conn = get_db()
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
+
+        driver_id = None
+        final_driver_name = driver_name if driver_name else 'Not Assigned'
+        if driver_name and driver_name.lower() not in ("not assigned", "unassigned"):
+            cursor.execute(
+                "SELECT user_id FROM users WHERE LOWER(TRIM(full_name)) = LOWER(TRIM(%s)) AND role = 'Driver' LIMIT 1",
+                (driver_name,)
+            )
+            d_row = cursor.fetchone()
+            if d_row:
+                driver_id = d_row["user_id"]
 
         cursor.execute(
             """
             UPDATE buses
-            SET bus_number = %s, route = %s, driver_name = %s, status = %s
+            SET bus_number = %s, route = %s, driver_name = %s, driver_id = %s, status = %s
             WHERE bus_id = %s
             """,
-            (bus_number, route, driver_name, status, bus_id)
+            (bus_number, route, final_driver_name, driver_id, status, bus_id)
         )
         if cursor.rowcount == 0:
 
@@ -1784,6 +1522,26 @@ def delete_bus(bus_id):
         conn = get_db()
         cursor = conn.cursor()
 
+        # 1. Unassign children assigned to this bus
+        cursor.execute(
+            """
+            UPDATE parent_children
+            SET bus_id = NULL
+            WHERE bus_id = %s
+            """,
+            (bus_id,)
+        )
+
+        # 2. Delete boarding records for this bus
+        cursor.execute(
+            """
+            DELETE FROM student_boarding
+            WHERE bus_id = %s
+            """,
+            (bus_id,)
+        )
+
+        # 3. Delete bus record
         cursor.execute(
             """
             DELETE FROM buses
@@ -1886,15 +1644,17 @@ def get_drivers():
         cursor.execute(
             """
             SELECT
-                user_id,
-                full_name,
-                email,
-                phone,
-                role,
-                status
-            FROM users
-            WHERE role = 'Driver'
-            ORDER BY user_id DESC
+                u.user_id,
+                u.full_name,
+                u.email,
+                u.phone,
+                u.role,
+                u.status,
+                COALESCE(d2fa.is_enabled, 0) AS two_factor_enabled
+            FROM users u
+            LEFT JOIN driver_2fa d2fa ON u.user_id = d2fa.user_id
+            WHERE u.role = 'Driver'
+            ORDER BY u.user_id DESC
             """
 )
         
@@ -3700,13 +3460,12 @@ def get_parent_dashboard(parent_id):
                 "message": "Parent not found"
             }), 404
 
-        parent_status = str(parent.get("status") or "APPROVED").strip().upper()
-        if parent_status not in ["APPROVED", "ACTIVE"]:
+        if str(parent["status"]).upper() != "APPROVED":
 
             return jsonify({
                 "success": False,
                 "message": "Parent account is not approved",
-                "status": parent.get("status")
+                "status": parent["status"]
             }), 403
 
         # ----------------------------------------------------
@@ -3735,8 +3494,8 @@ def get_parent_dashboard(parent_id):
                 ps.latitude,
                 ps.longitude,
 
-                cba.absence_id IS NOT NULL AND cba.status = 'Not Riding Today' AS is_absent,
-                COALESCE(sb.boarding_status, CASE WHEN cba.absence_id IS NOT NULL AND cba.status = 'Not Riding Today' THEN 'SKIP' ELSE 'Not Boarded' END) AS boarding_status,
+                IF(cba.absence_id IS NOT NULL, 'SKIP', COALESCE(sb.boarding_status, 'Not Boarded')) AS boarding_status,
+                IF(cba.absence_id IS NOT NULL, TRUE, FALSE) AS is_absent,
                 sb.boarding_time
 
             FROM parent_children pc
@@ -3754,15 +3513,15 @@ def get_parent_dashboard(parent_id):
             LEFT JOIN pickup_stops ps
                 ON pc.pickup_stop_id = ps.stop_id
 
-            LEFT JOIN child_bus_absence cba
-                ON pc.child_id = cba.child_id AND cba.absence_date = CURDATE()
-
             LEFT JOIN student_boarding sb
                 ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
 
+            LEFT JOIN child_bus_absence cba
+                ON pc.child_id = cba.child_id AND cba.absence_date = CURDATE() AND cba.status != 'CANCELLED'
+
             WHERE pc.parent_id = %s
 
-            GROUP BY pc.child_id, pc.child_name, pc.class_name, pc.bus_id, b.bus_number, u_driver.full_name, b.driver_name, u_driver.phone, b.status, pc.route_id, r.route_name, b.route, pc.pickup_stop_id, ps.stop_name, ps.stop_order, ps.latitude, ps.longitude, cba.absence_id, cba.status, sb.boarding_status, sb.boarding_time
+            GROUP BY pc.child_id
             ORDER BY pc.child_id ASC
             """,
             (parent_id,)
@@ -3776,7 +3535,6 @@ def get_parent_dashboard(parent_id):
 
             trip_status = "Not Started"
             eta = "ETA: Not available"
-            active_trip = None
 
             if bus_id:
                 # Check for active trip for this bus
@@ -3808,30 +3566,20 @@ def get_parent_dashboard(parent_id):
                     stop_lat = child_dict.get("latitude")
                     stop_lng = child_dict.get("longitude")
 
-                    if driver_lat and driver_lng:
+                    if driver_lat and driver_lng and stop_lat and stop_lng:
                         try:
                             import math
                             lat1, lon1 = float(driver_lat), float(driver_lng)
-                            school_data = get_current_school_settings()
-                            sch_lat, sch_lng = float(school_data["latitude"]), float(school_data["longitude"])
-                            
-                            # Distance to school
-                            dlat_s = math.radians(sch_lat - lat1)
-                            dlon_s = math.radians(sch_lng - lon1)
-                            a_s = math.sin(dlat_s / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(sch_lat)) * math.sin(dlon_s / 2)**2
-                            c_s = 2 * math.atan2(math.sqrt(a_s), math.sqrt(1 - a_s))
-                            mins_school = max(1, int((6371 * c_s / 30.0) * 60))
-                            
-                            if stop_lat and stop_lng:
-                                lat2, lon2 = float(stop_lat), float(stop_lng)
-                                dlat = math.radians(lat2 - lat1)
-                                dlon = math.radians(lon2 - lon1)
-                                a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
-                                c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-                                mins_pickup = max(1, int((6371 * c / 30.0) * 60))
-                                eta = f"{mins_pickup} min (Pickup) • {mins_school} min (School)"
-                            else:
-                                eta = f"{mins_school} min (School Arrival)"
+                            lat2, lon2 = float(stop_lat), float(stop_lng)
+                            dlat = math.radians(lat2 - lat1)
+                            dlon = math.radians(lon2 - lon1)
+                            a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
+                            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+                            dist_km = 6371 * c
+                            minutes = int((dist_km / 30.0) * 60)
+                            if minutes < 1:
+                                minutes = 1
+                            eta = f"{minutes} min"
                         except Exception:
                             eta = "ETA: Not available"
                     else:
@@ -3843,10 +3591,6 @@ def get_parent_dashboard(parent_id):
                 trip_status = "Not Started"
                 eta = "ETA: Not available"
 
-            is_absent = bool(child_dict.get("is_absent"))
-            child_dict["is_absent"] = is_absent
-            child_dict["bus_today_status"] = "NOT RIDING TODAY" if is_absent else "RIDING TODAY"
-            child_dict["trip_started"] = bool(active_trip)
             child_dict["trip_status"] = trip_status
             child_dict["eta"] = eta
             processed_children.append(child_dict)
@@ -3854,8 +3598,7 @@ def get_parent_dashboard(parent_id):
         return jsonify({
             "success": True,
             "parent": serialize_row(parent),
-            "children": processed_children,
-            "school": get_current_school_settings()
+            "children": processed_children
         }), 200
 
     except mysql.connector.Error as e:
@@ -3936,7 +3679,7 @@ def get_parent_children(parent_id):
                 ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
 
             WHERE pc.parent_id = %s
-            GROUP BY pc.child_id, pc.child_name, pc.class_name, pc.bus_id, b.bus_number, u_driver.full_name, b.driver_name, u_driver.phone, pc.route_id, r.route_id, r.route_name, b.route, pc.pickup_stop_id, ps.stop_name, ps.latitude, ps.longitude, sb.boarding_status, sb.boarding_time
+            GROUP BY pc.child_id
             ORDER BY pc.child_id ASC
             """,
             (parent_id,)
@@ -4268,7 +4011,7 @@ def get_driver_dashboard(driver_id):
                 LEFT JOIN student_boarding sb
                     ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
                 WHERE pc.bus_id = %s OR (pc.bus_id IS NULL AND LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s)))
-                GROUP BY pc.child_id, pc.child_name, pc.class_name, pc.bus_id, b.bus_number, pc.route_id, r.route_name, pc.pickup_stop_id, ps.stop_name, ps.latitude, ps.longitude, sb.boarding_status, sb.boarding_time, u_parent.full_name, u_parent.phone, u_parent.email
+                GROUP BY pc.child_id
                 ORDER BY pc.child_name ASC
                 """,
                 (bus["bus_id"], bus.get("route"))
@@ -5060,6 +4803,57 @@ def get_driver_emergencies(driver_id):
 # DRIVER PHONE CHANGE 2FA (EMAIL OTP)
 # ============================================================
 
+
+def send_2fa_otp_email(to_email, user_name, otp, purpose="LOGIN"):
+    mail_server = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
+    mail_port = int(os.environ.get("MAIL_PORT", 587))
+    mail_username = os.environ.get("MAIL_USERNAME", "")
+    mail_password = os.environ.get("MAIL_PASSWORD", "")
+    mail_from = os.environ.get("MAIL_FROM", mail_username or "noreply@routesafe.com")
+    use_tls = os.environ.get("MAIL_USE_TLS", "true").lower() in ("true", "1", "yes")
+
+    subject_map = {
+        "LOGIN": "RouteSafe - Two-Factor Authentication Login Code",
+        "ENABLE": "RouteSafe - Enable 2FA Verification Code",
+        "DISABLE": "RouteSafe - Disable 2FA Verification Code",
+        "RECOVERY": "RouteSafe - Account Recovery Verification Code"
+    }
+    subject = subject_map.get(purpose, "RouteSafe - 2FA Verification Code")
+    p_name = purpose.replace('_', ' ')
+    body = f"""Hello {user_name},
+
+Your RouteSafe Two-Factor Authentication (2FA) verification code is:
+
+    {otp}
+
+This code will expire in 5 minutes.
+Purpose: {p_name}
+
+If you did not request this code, please secure your account immediately.
+"""
+
+    if not mail_username or not mail_password:
+        print(f"[MAIL NOTICE] SMTP credentials not set. 2FA Code for {to_email} ({purpose}): {otp}")
+        return True, "Code generated (SMTP not configured)"
+
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = mail_from
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+        server = smtplib.SMTP(mail_server, mail_port, timeout=10)
+        if use_tls:
+            server.starttls()
+        server.login(mail_username, mail_password)
+        server.send_message(msg)
+        server.quit()
+        return True, "Email sent successfully"
+    except Exception as e:
+        print(f"[MAIL ERROR] Failed to send 2FA OTP to {to_email}: {e}")
+        return False, str(e)
+
+
 def send_otp_email(to_email, driver_name, otp):
     mail_server = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
         
@@ -5131,6 +4925,48 @@ try:
     init_otp_table()
 except Exception:
     pass
+
+def init_2fa_tables():
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS driver_2fa (
+            user_id INT PRIMARY KEY,
+            is_enabled TINYINT(1) DEFAULT 0,
+            recovery_email VARCHAR(255) NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        );
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS driver_2fa_otp (
+            otp_id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT NOT NULL,
+            temp_token VARCHAR(255) NOT NULL,
+            otp_hash VARCHAR(255) NOT NULL,
+            purpose VARCHAR(50) DEFAULT 'LOGIN',
+            attempts INT DEFAULT 0,
+            verified TINYINT(1) DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NOT NULL,
+            INDEX (temp_token),
+            INDEX (user_id)
+        );
+        """)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print("2FA tables initialized successfully.")
+    except Exception as e:
+        print(f"Error initializing 2FA tables: {e}")
+
+try:
+    init_2fa_tables()
+except Exception as e:
+    print(f"2FA table init call error: {e}")
+
 
 
 @app.route("/driver/<int:driver_id>/phone-change/request", methods=["POST"])
@@ -5358,263 +5194,6 @@ def verify_driver_phone_change(driver_id):
 
 
 
-
-# ============================================================
-# PARENT ABSENCE & DYNAMIC ITINERARY ENDPOINTS
-# ============================================================
-
-@app.route("/parent/<int:parent_id>/child/<int:child_id>/absence", methods=["POST"])
-def mark_child_absent(parent_id, child_id):
-    ensure_absence_table()
-    conn = None
-    cursor = None
-    try:
-        data = request.get_json(silent=True) or {}
-        absence_date = data.get("absence_date") or datetime.now().strftime("%Y-%m-%d")
-
-        conn = get_db()
-        cursor = conn.cursor(dictionary=True)
-
-        cursor.execute("SELECT user_id, status FROM users WHERE user_id = %s AND role = 'Parent'", (parent_id,))
-        parent = cursor.fetchone()
-        if not parent or str(parent.get("status")).upper() != "APPROVED":
-            return jsonify({"success": False, "message": "Unauthorized or unapproved parent account"}), 403
-
-        cursor.execute(
-            "SELECT pc.child_id, pc.child_name, pc.bus_id, pc.route_id, pc.pickup_stop_id FROM parent_children pc WHERE pc.child_id = %s AND pc.parent_id = %s",
-            (child_id, parent_id)
-        )
-        child = cursor.fetchone()
-        if not child:
-            return jsonify({"success": False, "message": "Child not found for this parent"}), 404
-
-        if child.get("bus_id"):
-            cursor.execute(
-                """
-                SELECT dt.trip_id
-                FROM driver_trips dt
-                WHERE dt.bus_id = %s AND dt.status = 'Active' AND DATE(dt.start_time) = %s
-                LIMIT 1
-                """,
-                (child["bus_id"], absence_date)
-            )
-            if cursor.fetchone():
-                return jsonify({
-                    "success": False,
-                    "message": "The trip has already started. Today's absence can no longer be changed."
-                }), 400
-
-        cursor.execute(
-            """
-            INSERT INTO child_bus_absence (child_id, parent_id, route_id, stop_id, absence_date, status)
-            VALUES (%s, %s, %s, %s, %s, 'Not Riding Today')
-            ON DUPLICATE KEY UPDATE status = 'Not Riding Today', updated_at = CURRENT_TIMESTAMP
-            """,
-            (child_id, parent_id, child.get("route_id"), child.get("pickup_stop_id"), absence_date)
-        )
-        conn.commit()
-
-        return jsonify({
-            "success": True,
-            "message": f"{child['child_name']} marked as Not Riding Today",
-            "is_absent": True,
-            "status": "Not Riding Today"
-        }), 200
-
-    except mysql.connector.Error as e:
-        return jsonify({"success": False, "message": f"Database error: {e}"}), 500
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
-
-
-@app.route("/parent/<int:parent_id>/child/<int:child_id>/absence/cancel", methods=["POST"])
-@app.route("/parent/<int:parent_id>/child/<int:child_id>/absence", methods=["DELETE"])
-def cancel_child_absence(parent_id, child_id):
-    ensure_absence_table()
-    conn = None
-    cursor = None
-    try:
-        data = request.get_json(silent=True) or {}
-        absence_date = data.get("absence_date") or datetime.now().strftime("%Y-%m-%d")
-
-        conn = get_db()
-        cursor = conn.cursor(dictionary=True)
-
-        cursor.execute(
-            "SELECT pc.child_id, pc.child_name, pc.bus_id FROM parent_children pc WHERE pc.child_id = %s AND pc.parent_id = %s",
-            (child_id, parent_id)
-        )
-        child = cursor.fetchone()
-        if not child:
-            return jsonify({"success": False, "message": "Child not found for this parent"}), 404
-
-        if child.get("bus_id"):
-            cursor.execute(
-                "SELECT dt.trip_id FROM driver_trips dt WHERE dt.bus_id = %s AND dt.status = 'Active' AND DATE(dt.start_time) = %s LIMIT 1",
-                (child["bus_id"], absence_date)
-            )
-            if cursor.fetchone():
-                return jsonify({
-                    "success": False,
-                    "message": "The trip has already started. Today's absence can no longer be changed."
-                }), 400
-
-        cursor.execute("DELETE FROM child_bus_absence WHERE child_id = %s AND absence_date = %s", (child_id, absence_date))
-        conn.commit()
-
-        return jsonify({
-            "success": True,
-            "message": f"Absence for {child['child_name']} cancelled successfully",
-            "is_absent": False,
-            "status": "Riding Today"
-        }), 200
-
-    except mysql.connector.Error as e:
-        return jsonify({"success": False, "message": f"Database error: {e}"}), 500
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
-
-
-@app.route("/parent/<int:parent_id>/child/<int:child_id>/absence", methods=["GET"])
-def get_child_absence_status(parent_id, child_id):
-    ensure_absence_table()
-    conn = None
-    cursor = None
-    try:
-        absence_date = request.args.get("date") or datetime.now().strftime("%Y-%m-%d")
-
-        conn = get_db()
-        cursor = conn.cursor(dictionary=True)
-
-        cursor.execute("SELECT pc.child_id, pc.child_name, pc.bus_id FROM parent_children pc WHERE pc.child_id = %s AND pc.parent_id = %s", (child_id, parent_id))
-        child = cursor.fetchone()
-        if not child:
-            return jsonify({"success": False, "message": "Child not found"}), 404
-
-        cursor.execute("SELECT * FROM child_bus_absence WHERE child_id = %s AND absence_date = %s", (child_id, absence_date))
-        absence = cursor.fetchone()
-
-        trip_started = False
-        if child.get("bus_id"):
-            cursor.execute("SELECT trip_id FROM driver_trips WHERE bus_id = %s AND status = 'Active' AND DATE(start_time) = %s LIMIT 1", (child["bus_id"], absence_date))
-            if cursor.fetchone():
-                trip_started = True
-
-        is_absent = bool(absence and absence.get("status") == "Not Riding Today")
-
-        return jsonify({
-            "success": True,
-            "is_absent": is_absent,
-            "status": "Not Riding Today" if is_absent else "Riding Today",
-            "trip_started": trip_started,
-            "absence": serialize_row(absence) if absence else None
-        }), 200
-
-    except mysql.connector.Error as e:
-        return jsonify({"success": False, "message": f"Database error: {e}"}), 500
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
-
-
-@app.route("/driver/<int:driver_id>/itinerary", methods=["GET"])
-def get_driver_active_itinerary(driver_id):
-    ensure_absence_table()
-    conn = None
-    cursor = None
-    try:
-        conn = get_db()
-        cursor = conn.cursor(dictionary=True)
-
-        cursor.execute("SELECT full_name FROM users WHERE user_id = %s AND role = 'Driver'", (driver_id,))
-        driver = cursor.fetchone()
-        if not driver:
-            return jsonify({"success": False, "message": "Driver not found"}), 404
-
-        cursor.execute(
-            "SELECT bus_id, bus_number, route, registration_number, start_point, destination FROM buses WHERE driver_id = %s OR LOWER(TRIM(driver_name)) = LOWER(TRIM(%s)) LIMIT 1",
-            (driver_id, driver["full_name"])
-        )
-        bus = cursor.fetchone()
-        if not bus:
-            return jsonify({"success": True, "bus": None, "all_stops": [], "active_stops": [], "skipped_stops": [], "students": []}), 200
-
-        stops = []
-        if bus.get("route"):
-            cursor.execute(
-                """
-                SELECT ps.stop_id, ps.stop_name, ps.stop_order, ps.latitude, ps.longitude
-                FROM pickup_stops ps
-                JOIN routes r ON ps.route_id = r.route_id
-                WHERE LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s))
-                ORDER BY ps.stop_order ASC
-                """,
-                (bus["route"],)
-            )
-            stops = cursor.fetchall() or []
-
-        cursor.execute(
-            """
-            SELECT
-                pc.child_id,
-                pc.child_name,
-                pc.class_name,
-                pc.parent_id,
-                u.full_name AS parent_name,
-                u.phone AS parent_phone,
-                pc.pickup_stop_id,
-                ps.stop_name,
-                ps.latitude AS stop_latitude,
-                ps.longitude AS stop_longitude,
-                cba.absence_id IS NOT NULL AND cba.status = 'Not Riding Today' AS is_absent,
-                COALESCE(sb.boarding_status, CASE WHEN cba.absence_id IS NOT NULL AND cba.status = 'Not Riding Today' THEN 'SKIP' ELSE 'Not Boarded' END) AS boarding_status
-            FROM parent_children pc
-            LEFT JOIN users u ON pc.parent_id = u.user_id
-            LEFT JOIN pickup_stops ps ON pc.pickup_stop_id = ps.stop_id
-            LEFT JOIN routes r ON pc.route_id = r.route_id
-            LEFT JOIN child_bus_absence cba ON pc.child_id = cba.child_id AND cba.absence_date = CURDATE()
-            LEFT JOIN student_boarding sb ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
-            WHERE pc.bus_id = %s OR (pc.bus_id IS NULL AND LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s)))
-            GROUP BY pc.child_id, pc.child_name, pc.class_name, pc.parent_id, u.full_name, u.phone, pc.pickup_stop_id, ps.stop_name, ps.latitude, ps.longitude, cba.absence_id, cba.status, sb.boarding_status
-            ORDER BY pc.child_name ASC
-            """,
-            (bus["bus_id"], bus.get("route"))
-        )
-        students = cursor.fetchall() or []
-
-        active_stops = []
-        skipped_stops = []
-
-        for stop in stops:
-            sid = stop["stop_id"]
-            stop_students = [s for s in students if s.get("pickup_stop_id") == sid]
-            stop_dict = serialize_row(stop)
-            if stop_students and all(s.get("is_absent") for s in stop_students):
-                stop_dict["is_skipped"] = True
-                stop_dict["skip_reason"] = "Child is not riding today"
-                skipped_stops.append(stop_dict)
-            else:
-                stop_dict["is_skipped"] = False
-                active_stops.append(stop_dict)
-
-        return jsonify({
-            "success": True,
-            "bus": serialize_row(bus),
-            "all_stops": [serialize_row(s) for s in stops],
-            "active_stops": active_stops,
-            "skipped_stops": skipped_stops,
-            "students": [serialize_row(s) for s in students]
-        }), 200
-
-    except mysql.connector.Error as e:
-        return jsonify({"success": False, "message": f"Database error: {e}"}), 500
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
-
-
 # ============================================================
 # DRIVER MODULE EXTENSION ENDPOINTS
 # ============================================================
@@ -5691,12 +5270,7 @@ def get_driver_bus_details(driver_id):
         )
         bus = cursor.fetchone()
         if not bus:
-            return jsonify({
-                "success": True,
-                "bus": None,
-                "stops": [],
-                "message": "No bus assigned to driver"
-            }), 200
+            return jsonify({"success": False, "message": "No bus assigned to driver"}), 444
             
         # Get route stops if route exists
         stops = []
@@ -5761,29 +5335,23 @@ def get_driver_assigned_students(driver_id):
                 ps.stop_name,
                 ps.latitude AS stop_latitude,
                 ps.longitude AS stop_longitude,
-                cba.absence_id IS NOT NULL AND cba.status = 'Not Riding Today' AS is_absent,
-                COALESCE(sb.boarding_status, CASE WHEN cba.absence_id IS NOT NULL AND cba.status = 'Not Riding Today' THEN 'SKIP' ELSE 'Not Boarded' END) AS boarding_status,
+                IF(cba.absence_id IS NOT NULL, 'SKIP', COALESCE(sb.boarding_status, 'Not Boarded')) AS boarding_status,
+                IF(cba.absence_id IS NOT NULL, TRUE, FALSE) AS is_absent,
                 sb.boarding_time
             FROM parent_children pc
             LEFT JOIN users u ON pc.parent_id = u.user_id
             LEFT JOIN pickup_stops ps ON pc.pickup_stop_id = ps.stop_id
             LEFT JOIN routes r ON pc.route_id = r.route_id
-            LEFT JOIN child_bus_absence cba ON pc.child_id = cba.child_id AND cba.absence_date = CURDATE()
             LEFT JOIN student_boarding sb ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
+            LEFT JOIN child_bus_absence cba ON pc.child_id = cba.child_id AND cba.absence_date = CURDATE() AND cba.status != 'CANCELLED'
             WHERE pc.bus_id = %s OR (pc.bus_id IS NULL AND LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s)))
-            GROUP BY pc.child_id, pc.child_name, pc.class_name, pc.parent_id, u.full_name, u.phone, u.email, pc.pickup_stop_id, ps.stop_name, ps.latitude, ps.longitude, cba.absence_id, cba.status, sb.boarding_status, sb.boarding_time
+            GROUP BY pc.child_id
             ORDER BY pc.child_name ASC
             """,
             (bus["bus_id"], bus.get("route"))
         )
         students = cursor.fetchall()
-        serialized_students = []
-        for s in students:
-            row_dict = serialize_row(s)
-            if row_dict.get("is_absent") and row_dict.get("boarding_status") != "Boarded":
-                row_dict["boarding_status"] = "SKIP"
-                row_dict["absence_reason"] = "Not Riding Today"
-            serialized_students.append(row_dict)
+        serialized_students = [serialize_row(s) for s in students]
         return jsonify({
             "success": True,
             "students": serialized_students,
@@ -5836,17 +5404,6 @@ def update_student_boarding(driver_id):
         child = cursor.fetchone()
         if not child:
             return jsonify({"success": False, "message": "Student is not assigned to this driver's bus"}), 400
-
-        # Check if child is marked as Not Riding Today
-        cursor.execute(
-            "SELECT absence_id FROM child_bus_absence WHERE child_id = %s AND absence_date = CURDATE() AND status = 'Not Riding Today'",
-            (child_id,)
-        )
-        if cursor.fetchone() and boarding_status == "Boarded":
-            return jsonify({
-                "success": False,
-                "message": "Child is marked as not riding today."
-            }), 400
 
         cursor.execute("SELECT trip_id FROM driver_trips WHERE driver_id = %s AND status = 'Active' ORDER BY trip_id DESC LIMIT 1", (driver_id,))
         trip = cursor.fetchone()
@@ -6169,7 +5726,31 @@ def approve_driver(driver_id):
 
         # Assign bus if provided
         if bus_id:
+            cursor.execute(
+                """
+                SELECT bus_id, bus_number, driver_id, driver_name
+                FROM buses
+                WHERE bus_id = %s
+                """,
+                (bus_id,)
+            )
+            target_bus = cursor.fetchone()
+            if not target_bus:
+                return jsonify({
+                    "success": False,
+                    "message": "Selected bus does not exist"
+                }), 404
 
+            # Clear previous bus assignments for THIS driver to avoid duplicate active assignments
+            cursor.execute(
+                """
+                UPDATE buses
+                SET driver_name = 'Not Assigned', driver_id = NULL
+                WHERE driver_id = %s OR LOWER(TRIM(driver_name)) = LOWER(TRIM(%s))
+                """,
+                (driver_id, driver["full_name"])
+            )
+            # Assign new bus to this driver
             cursor.execute(
                 """
                 UPDATE buses
@@ -6177,12 +5758,13 @@ def approve_driver(driver_id):
                 WHERE bus_id = %s
                 """,
                 (driver["full_name"], driver_id, bus_id)
-        )
+            )
         conn.commit()
 
+        msg = "Driver approved and bus assigned successfully" if bus_id else "Driver approved successfully"
         return jsonify({
             "success": True,
-            "message": "Driver approved and bus assigned successfully",
+            "message": msg,
             "driver_id": driver_id,
             "bus_id": bus_id
         }), 200
@@ -6589,31 +6171,12 @@ def get_admin_analytics():
 
         cursor.execute("SELECT status, COUNT(*) AS count FROM driver_trips GROUP BY status")
         trips_breakdown = {r["status"]: r["count"] for r in cursor.fetchall()}
-        active_trips = trips_breakdown.get("Active", 0)
-        completed_trips = trips_breakdown.get("Completed", 0)
 
         cursor.execute("SELECT boarding_status, COUNT(*) AS count FROM student_boarding GROUP BY boarding_status")
         boarding_breakdown = {r["boarding_status"]: r["count"] for r in cursor.fetchall()}
-        boarded_students = boarding_breakdown.get("Boarded", 0)
-        not_boarded_students = boarding_breakdown.get("Not Boarded", 0)
 
         cursor.execute("SELECT status, COUNT(*) AS count FROM buses GROUP BY status")
         bus_breakdown = {r["status"]: r["count"] for r in cursor.fetchall()}
-        cursor.execute("SELECT COUNT(*) AS total FROM buses")
-        total_buses = cursor.fetchone()["total"]
-
-        cursor.execute("SELECT status, COUNT(*) AS count FROM users WHERE role = 'Driver' GROUP BY status")
-        driver_breakdown = {r["status"]: r["count"] for r in cursor.fetchall()}
-        approved_drivers = driver_breakdown.get("APPROVED", 0)
-        pending_drivers = driver_breakdown.get("PENDING", 0)
-
-        cursor.execute("SELECT status, COUNT(*) AS count FROM users WHERE role = 'Parent' GROUP BY status")
-        parent_breakdown = {r["status"]: r["count"] for r in cursor.fetchall()}
-        approved_parents = parent_breakdown.get("APPROVED", 0)
-        pending_parents = parent_breakdown.get("PENDING", 0)
-
-        cursor.execute("SELECT COUNT(*) AS total FROM parent_children")
-        total_students = cursor.fetchone()["total"]
 
         cursor.execute("SELECT COALESCE(emergency_type, 'Other') AS type, COUNT(*) AS count FROM driver_emergencies GROUP BY type")
         emergency_breakdown = {r["type"]: r["count"] for r in cursor.fetchall()}
@@ -6622,23 +6185,8 @@ def get_admin_analytics():
             "success": True,
             "analytics": {
                 "trips": trips_breakdown,
-                "active_trips": active_trips,
-                "completed_trips": completed_trips,
                 "boarding": boarding_breakdown,
-                "boarded_students": boarded_students,
-                "not_boarded_students": not_boarded_students,
                 "buses": bus_breakdown,
-                "total_buses": total_buses,
-                "active_buses": bus_breakdown.get("Active", total_buses),
-                "drivers": driver_breakdown,
-                "total_drivers": approved_drivers + pending_drivers,
-                "approved_drivers": approved_drivers,
-                "pending_drivers": pending_drivers,
-                "parents": parent_breakdown,
-                "total_parents": approved_parents + pending_parents,
-                "approved_parents": approved_parents,
-                "pending_parents": pending_parents,
-                "total_students": total_students,
                 "emergencies": emergency_breakdown
             }
         }), 200
@@ -6647,199 +6195,890 @@ def get_admin_analytics():
     finally:
         if cursor: cursor.close()
         if conn: conn.close()
+
+
+
+
 # ============================================================
-# SCHOOL SETTINGS ENDPOINTS
+# DRIVER 2FA SECURITY ENDPOINTS
 # ============================================================
 
-@app.route("/school-settings", methods=["GET"])
-@app.route("/admin/school-settings", methods=["GET"])
-def get_school_settings_route():
-    school = get_current_school_settings()
-    return jsonify({
-        "success": True,
-        "school": school
-    }), 200
-
-
-@app.route("/school-settings", methods=["PUT", "POST"])
-@app.route("/admin/school-settings", methods=["PUT", "POST"])
-def update_school_settings_route():
-    data = request.get_json(silent=True) or {}
-    school_name = str(data.get("school_name") or data.get("name") or "").strip()
-    address = str(data.get("address") or "").strip()
-    
-    try:
-        latitude = float(data.get("latitude"))
-        longitude = float(data.get("longitude"))
-    except (ValueError, TypeError):
-        return jsonify({"success": False, "message": "Valid numerical latitude and longitude values are required"}), 400
-
-    if not school_name:
-        return jsonify({"success": False, "message": "School name is required"}), 400
-    if not address:
-        return jsonify({"success": False, "message": "Address is required"}), 400
-
-    conn = None
-    cursor = None
+@app.route("/api/driver/2fa/status", methods=["GET"])
+def get_driver_2fa_status():
+    driver_id = request.args.get("driver_id") or request.args.get("user_id")
+    if not driver_id:
+        return jsonify({"success": False, "message": "driver_id or user_id required"}), 400
     try:
         conn = get_db()
         cursor = conn.cursor(dictionary=True)
-        ensure_school_table()
-        cursor.execute("SELECT id FROM school_settings ORDER BY id ASC LIMIT 1")
-        existing = cursor.fetchone()
-        if existing:
-            cursor.execute("""
-                UPDATE school_settings
-                SET school_name = %s, address = %s, latitude = %s, longitude = %s
-                WHERE id = %s
-            """, (school_name, address, latitude, longitude, existing["id"]))
-        else:
-            cursor.execute("""
-                INSERT INTO school_settings (id, school_name, address, latitude, longitude)
-                VALUES (1, %s, %s, %s, %s)
-            """, (school_name, address, latitude, longitude))
-        conn.commit()
-        
-        updated_school = get_current_school_settings()
-        return jsonify({
-            "success": True,
-            "message": "School settings saved successfully in MySQL",
-            "school": updated_school
-        }), 200
-    except mysql.connector.Error as e:
-        return jsonify({"success": False, "message": f"Database error: {e}"}), 500
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
+        cursor.execute("SELECT is_enabled FROM driver_2fa WHERE user_id = %s LIMIT 1", (driver_id,))
+        rec = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        is_enabled = bool(rec and rec.get("is_enabled") == 1)
+        return jsonify({"success": True, "is_enabled": is_enabled}), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
 
-# ============================================================
-# PARENT NOTIFICATIONS ENDPOINT
-# ============================================================
 
-@app.route("/parent/<int:parent_id>/notifications", methods=["GET"])
-def get_parent_notifications(parent_id):
-    conn = None
-    cursor = None
+@app.route("/api/driver/2fa/verify-login", methods=["POST"])
+def verify_driver_2fa_login():
+    data = request.get_json(silent=True) or {}
+    temp_token = str(data.get("temp_token") or "").strip()
+    otp_input = str(data.get("otp") or "").strip()
+
+    if not temp_token or not otp_input:
+        return jsonify({"success": False, "message": "Verification token and code are required."}), 400
+
+    if not otp_input.isdigit() or len(otp_input) != 6:
+        return jsonify({"success": False, "message": "Code must be a 6-digit number."}), 400
+
     try:
         conn = get_db()
         cursor = conn.cursor(dictionary=True)
 
         cursor.execute(
             """
-            SELECT child_id, child_name, bus_id, pickup_stop_id
-            FROM parent_children
-            WHERE parent_id = %s
+            SELECT * FROM driver_2fa_otp
+            WHERE temp_token = %s AND purpose = 'LOGIN' AND verified = 0
+            ORDER BY otp_id DESC LIMIT 1
             """,
-            (parent_id,)
+            (temp_token,)
         )
-        children = cursor.fetchall()
-        if not children:
-            return jsonify({"success": True, "notifications": []}), 200
+        rec = cursor.fetchone()
 
-        child_ids = [c["child_id"] for c in children]
-        child_map = {c["child_id"]: c["child_name"] for c in children}
-        bus_ids = [c["bus_id"] for c in children if c["bus_id"]]
+        if not rec:
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "Invalid or expired 2FA session. Please log in again."}), 400
 
-        notifications = []
+        # Check expiration
+        expires_at = rec["expires_at"]
+        if isinstance(expires_at, str):
+            expires_at = datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S")
+        if expires_at < datetime.now():
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "2FA code has expired. Please log in again to receive a new code."}), 400
 
-        # 1. Boarding Notifications
-        if child_ids:
-            format_strings = ','.join(['%s'] * len(child_ids))
+        # Check max attempts
+        attempts = int(rec.get("attempts") or 0)
+        if attempts >= 5:
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "Maximum verification attempts exceeded. Please log in again."}), 400
+
+        # Verify OTP hash
+        if not check_password_hash(rec["otp_hash"], otp_input):
+            cursor.execute("UPDATE driver_2fa_otp SET attempts = attempts + 1 WHERE otp_id = %s", (rec["otp_id"],))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            remaining = 5 - (attempts + 1)
+            return jsonify({"success": False, "message": f"Incorrect 2FA code. {remaining} attempt(s) remaining."}), 400
+
+        # Mark OTP verified
+        cursor.execute("UPDATE driver_2fa_otp SET verified = 1 WHERE otp_id = %s", (rec["otp_id"],))
+        conn.commit()
+
+        # Fetch full user details for response
+        cursor.execute(
+            "SELECT user_id, full_name, email, phone, role, status FROM users WHERE user_id = %s LIMIT 1",
+            (rec["user_id"],)
+        )
+        user = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not user:
+            return jsonify({"success": False, "message": "User account not found."}), 404
+
+        user = serialize_row(user)
+        print(f"[2FA SUCCESS] Driver {user['email']} completed 2FA login.")
+        return jsonify({
+            "success": True,
+            "message": "2FA verification successful",
+            "user": user
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Database error: {e}"}), 500
+
+
+@app.route("/api/driver/2fa/resend-otp", methods=["POST"])
+def resend_driver_2fa_otp():
+    data = request.get_json(silent=True) or {}
+    temp_token = str(data.get("temp_token") or "").strip()
+    user_id = data.get("user_id") or data.get("driver_id")
+    purpose = str(data.get("purpose") or "LOGIN").strip().upper()
+
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        rec = None
+        if temp_token:
+            cursor.execute("SELECT * FROM driver_2fa_otp WHERE temp_token = %s ORDER BY otp_id DESC LIMIT 1", (temp_token,))
+            rec = cursor.fetchone()
+        elif user_id:
+            cursor.execute("SELECT * FROM driver_2fa_otp WHERE user_id = %s AND purpose = %s ORDER BY otp_id DESC LIMIT 1", (user_id, purpose))
+            rec = cursor.fetchone()
+
+        if not rec:
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "No active verification session found. Please try again."}), 400
+
+        # Rate limiting check: at least 30 seconds since created_at
+        created_at = rec["created_at"]
+        if isinstance(created_at, str):
+            created_at = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
+        if (datetime.now() - created_at).total_seconds() < 30:
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "Please wait at least 30 seconds before requesting a new code."}), 429
+
+        # Fetch user
+        cursor.execute("SELECT user_id, full_name, email FROM users WHERE user_id = %s LIMIT 1", (rec["user_id"],))
+        user = cursor.fetchone()
+
+        if not user:
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "User not found."}), 404
+
+        otp_val = f"{random.randint(100000, 999999)}"
+        otp_h = generate_password_hash(otp_val)
+        new_token = secrets.token_hex(32)
+        expires = datetime.now() + timedelta(minutes=5)
+
+        cursor.execute(
+            """
+            INSERT INTO driver_2fa_otp (user_id, temp_token, otp_hash, purpose, expires_at)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (rec["user_id"], new_token, otp_h, rec["purpose"], expires)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        send_2fa_otp_email(user["email"], user["full_name"], otp_val, rec["purpose"])
+        return jsonify({
+            "success": True,
+            "message": "A new verification code has been sent to your email.",
+            "temp_token": new_token
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+def request_enable_2fa_with_id(driver_id):
+    if not driver_id:
+        return jsonify({"success": False, "message": "driver_id or user_id required"}), 400
+
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT user_id, full_name, email FROM users WHERE user_id = %s AND LOWER(TRIM(role)) = 'driver' LIMIT 1",
+            (driver_id,)
+        )
+        driver = cursor.fetchone()
+        if not driver:
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": f"Driver with ID {driver_id} not found."}), 404
+
+        otp_val = f"{random.randint(100000, 999999)}"
+        otp_h = generate_password_hash(otp_val)
+        temp_tok = secrets.token_hex(32)
+        expires = datetime.now() + timedelta(minutes=5)
+
+        cursor.execute(
+            """
+            INSERT INTO driver_2fa_otp (user_id, temp_token, otp_hash, purpose, expires_at)
+            VALUES (%s, %s, %s, 'ENABLE', %s)
+            """,
+            (driver_id, temp_tok, otp_h, expires)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        send_2fa_otp_email(driver["email"], driver["full_name"], otp_val, "ENABLE")
+        return jsonify({
+            "success": True,
+            "temp_token": temp_tok,
+            "message": f"Verification code sent to {driver['email']}"
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/driver/2fa/request-enable", methods=["POST"])
+@app.route("/api/driver/2fa/request-enable/", methods=["POST"])
+def request_enable_2fa():
+    data = request.get_json(silent=True) or {}
+    driver_id = data.get("driver_id") or data.get("user_id")
+    return request_enable_2fa_with_id(driver_id)
+
+
+def verify_enable_2fa_with_params(driver_id, temp_token, otp_input):
+    if not driver_id or not otp_input:
+        return jsonify({"success": False, "message": "driver_id and 6-digit verification code are required"}), 400
+
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        rec = None
+        if temp_token:
             cursor.execute(
-                f"""
-                SELECT sb.attendance_id, sb.child_id, sb.boarding_status, sb.boarding_time, sb.attendance_date, b.bus_number
-                FROM student_boarding sb
-                LEFT JOIN buses b ON sb.bus_id = b.bus_id
-                WHERE sb.child_id IN ({format_strings})
-                ORDER BY sb.attendance_id DESC
-                LIMIT 50
+                """
+                SELECT * FROM driver_2fa_otp
+                WHERE temp_token = %s AND purpose = 'ENABLE' AND verified = 0
+                ORDER BY otp_id DESC LIMIT 1
                 """,
-                tuple(child_ids)
+                (temp_token,)
             )
-            boarding_rows = cursor.fetchall()
-            for r in boarding_rows:
-                cname = child_map.get(r["child_id"], "Student")
-                bnum = r.get("bus_number") or "School Bus"
-                bstatus = r.get("boarding_status") or "Boarded"
-                btime = serialize_row(r).get("boarding_time") or "Today"
-                notifications.append({
-                    "id": f"boarding_{r['attendance_id']}",
-                    "title": f"Child {bstatus}",
-                    "subtitle": f"{cname} was marked '{bstatus}' on {bnum}",
-                    "time": str(btime),
-                    "type": "boarding",
-                    "date": str(r.get("attendance_date") or "")
-                })
+            rec = cursor.fetchone()
 
-        # 2. Trip Notifications
-        if bus_ids:
-            format_strings_bus = ','.join(['%s'] * len(bus_ids))
+        if not rec:
             cursor.execute(
-                f"""
-                SELECT dt.trip_id, dt.bus_id, dt.start_time, dt.end_time, dt.status, b.bus_number, b.route
-                FROM driver_trips dt
-                LEFT JOIN buses b ON dt.bus_id = b.bus_id
-                WHERE dt.bus_id IN ({format_strings_bus})
-                ORDER BY dt.trip_id DESC
-                LIMIT 30
+                """
+                SELECT * FROM driver_2fa_otp
+                WHERE user_id = %s AND purpose = 'ENABLE' AND verified = 0
+                ORDER BY otp_id DESC LIMIT 1
                 """,
-                tuple(bus_ids)
+                (driver_id,)
             )
-            trip_rows = cursor.fetchall()
-            for t in trip_rows:
-                bnum = t.get("bus_number") or "School Bus"
-                route_name = t.get("route") or "School Route"
-                status = t.get("status") or "Completed"
-                t_time = serialize_row(t).get("start_time") or "Recently"
-                if status.lower() in ["active", "on route", "started"]:
-                    ntitle = "Trip Started"
-                    nsub = f"Bus {bnum} has started its trip on route {route_name}"
-                else:
-                    ntitle = "Trip Completed"
-                    nsub = f"Bus {bnum} completed trip on route {route_name}"
+            rec = cursor.fetchone()
 
-                notifications.append({
-                    "id": f"trip_{t['trip_id']}",
-                    "title": ntitle,
-                    "subtitle": nsub,
-                    "time": str(t_time),
-                    "type": "trip",
-                    "date": ""
-                })
+        if not rec:
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "No pending 2FA setup request found."}), 400
 
-        # 3. Pickup Stop Notifications
-        for c in children:
-            if c.get("pickup_stop_id"):
-                cursor.execute(
-                    """
-                    SELECT ps.stop_name, r.route_name
-                    FROM pickup_stops ps
-                    LEFT JOIN routes r ON ps.route_id = r.route_id
-                    WHERE ps.stop_id = %s
-                    """,
-                    (c["pickup_stop_id"],)
-                )
-                stop_row = cursor.fetchone()
-                if stop_row:
-                    notifications.append({
-                        "id": f"stop_{c['child_id']}",
-                        "title": "Pickup Stop Active",
-                        "subtitle": f"{c['child_name']} assigned to pickup stop: {stop_row['stop_name']} ({stop_row.get('route_name') or 'Route'})",
-                        "time": "Active",
-                        "type": "system",
-                        "date": ""
-                    })
+        if not check_password_hash(rec["otp_hash"], otp_input):
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "Incorrect verification code."}), 400
+
+        # Mark verified
+        cursor.execute("UPDATE driver_2fa_otp SET verified = 1 WHERE otp_id = %s", (rec["otp_id"],))
+
+        # Enable in driver_2fa
+        cursor.execute(
+            """
+            INSERT INTO driver_2fa (user_id, is_enabled)
+            VALUES (%s, 1)
+            ON DUPLICATE KEY UPDATE is_enabled = 1, updated_at = NOW()
+            """,
+            (driver_id,)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"success": True, "message": "Two-Factor Authentication has been enabled for your account!"}), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/driver/2fa/verify-enable", methods=["POST"])
+@app.route("/api/driver/2fa/verify-enable/", methods=["POST"])
+def verify_enable_2fa():
+    data = request.get_json(silent=True) or {}
+    driver_id = data.get("driver_id") or data.get("user_id")
+    temp_token = str(data.get("temp_token") or "").strip()
+    otp_input = str(data.get("otp") or data.get("code") or "").strip()
+    return verify_enable_2fa_with_params(driver_id, temp_token, otp_input)
+
+
+@app.route("/api/driver/2fa/request-disable", methods=["POST"])
+def request_disable_2fa():
+    data = request.get_json(silent=True) or {}
+    driver_id = data.get("driver_id") or data.get("user_id")
+    password = str(data.get("password") or "").strip()
+
+    if not driver_id or not password:
+        return jsonify({"success": False, "message": "Driver ID and password are required to disable 2FA."}), 400
+
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT user_id, full_name, email, password FROM users WHERE user_id = %s AND role = 'Driver' LIMIT 1", (driver_id,))
+        driver = cursor.fetchone()
+
+        if not driver:
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "Driver account not found."}), 404
+
+        # Validate password
+        pwd_valid = False
+        try:
+            pwd_valid = check_password_hash(driver["password"], password)
+        except Exception:
+            pwd_valid = False
+        if not pwd_valid and driver["password"] == password:
+            pwd_valid = True
+
+        if not pwd_valid:
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "Incorrect password. Cannot proceed with disabling 2FA."}), 401
+
+        otp_val = f"{random.randint(100000, 999999)}"
+        otp_h = generate_password_hash(otp_val)
+        temp_tok = secrets.token_hex(32)
+        expires = datetime.now() + timedelta(minutes=5)
+
+        cursor.execute(
+            """
+            INSERT INTO driver_2fa_otp (user_id, temp_token, otp_hash, purpose, expires_at)
+            VALUES (%s, %s, %s, 'DISABLE', %s)
+            """,
+            (driver_id, temp_tok, otp_h, expires)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        send_2fa_otp_email(driver["email"], driver["full_name"], otp_val, "DISABLE")
+        return jsonify({
+            "success": True,
+            "temp_token": temp_tok,
+            "message": f"Verification code sent to {driver['email']} to confirm disabling 2FA."
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/driver/2fa/verify-disable", methods=["POST"])
+def verify_disable_2fa():
+    data = request.get_json(silent=True) or {}
+    driver_id = data.get("driver_id") or data.get("user_id")
+    otp_input = str(data.get("otp") or "").strip()
+
+    if not driver_id or not otp_input:
+        return jsonify({"success": False, "message": "driver_id and code are required"}), 400
+
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute(
+            """
+            SELECT * FROM driver_2fa_otp
+            WHERE user_id = %s AND purpose = 'DISABLE' AND verified = 0
+            ORDER BY otp_id DESC LIMIT 1
+            """,
+            (driver_id,)
+        )
+        rec = cursor.fetchone()
+
+        if not rec:
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "No pending disable request found."}), 400
+
+        if not check_password_hash(rec["otp_hash"], otp_input):
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "Incorrect verification code."}), 400
+
+        cursor.execute("UPDATE driver_2fa_otp SET verified = 1 WHERE otp_id = %s", (rec["otp_id"],))
+        cursor.execute("UPDATE driver_2fa SET is_enabled = 0 WHERE user_id = %s", (driver_id,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return jsonify({"success": True, "message": "Two-Factor Authentication has been disabled for your account."}), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/driver/2fa/request-recovery", methods=["POST"])
+def request_driver_2fa_recovery():
+    data = request.get_json(silent=True) or {}
+    email = str(data.get("email") or "").strip().lower()
+    phone = str(data.get("phone") or "").strip()
+
+    if not email:
+        return jsonify({"success": False, "message": "Registered Driver email is required for recovery."}), 400
+
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute(
+            "SELECT user_id, full_name, email, phone FROM users WHERE LOWER(TRIM(email)) = %s AND role = 'Driver' LIMIT 1",
+            (email,)
+        )
+        driver = cursor.fetchone()
+
+        if not driver:
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "No registered Driver account found matching that email."}), 404
+
+        # Verify phone matching if provided
+        if phone:
+            db_phone = str(driver.get("phone") or "").strip()
+            if db_phone and phone not in db_phone and db_phone not in phone:
+                cursor.close()
+                conn.close()
+                return jsonify({"success": False, "message": "Phone number does not match registered account records."}), 400
+
+        otp_val = f"{random.randint(100000, 999999)}"
+        otp_h = generate_password_hash(otp_val)
+        temp_tok = secrets.token_hex(32)
+        expires = datetime.now() + timedelta(minutes=5)
+
+        cursor.execute(
+            """
+            INSERT INTO driver_2fa_otp (user_id, temp_token, otp_hash, purpose, expires_at)
+            VALUES (%s, %s, %s, 'RECOVERY', %s)
+            """,
+            (driver["user_id"], temp_tok, otp_h, expires)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        send_2fa_otp_email(driver["email"], driver["full_name"], otp_val, "RECOVERY")
+        return jsonify({
+            "success": True,
+            "temp_token": temp_tok,
+            "message": f"Account recovery verification code sent to your registered email ({driver['email']})."
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/driver/2fa/verify-recovery", methods=["POST"])
+def verify_driver_2fa_recovery():
+    data = request.get_json(silent=True) or {}
+    temp_token = str(data.get("temp_token") or "").strip()
+    otp_input = str(data.get("otp") or "").strip()
+
+    if not temp_token or not otp_input:
+        return jsonify({"success": False, "message": "Recovery token and code are required."}), 400
+
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute(
+            """
+            SELECT * FROM driver_2fa_otp
+            WHERE temp_token = %s AND purpose = 'RECOVERY' AND verified = 0
+            ORDER BY otp_id DESC LIMIT 1
+            """,
+            (temp_token,)
+        )
+        rec = cursor.fetchone()
+
+        if not rec:
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "Invalid or expired recovery session."}), 400
+
+        if not check_password_hash(rec["otp_hash"], otp_input):
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "Incorrect recovery code."}), 400
+
+        cursor.execute("UPDATE driver_2fa_otp SET verified = 1 WHERE otp_id = %s", (rec["otp_id"],))
+        cursor.execute("UPDATE driver_2fa SET is_enabled = 0 WHERE user_id = %s", (rec["user_id"],))
+        conn.commit()
+        cursor.close()
+        conn.close()
 
         return jsonify({
             "success": True,
-            "notifications": notifications
+            "message": "Identity verified successfully. 2FA has been reset for your Driver account. You can now log in using your password."
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/admin/driver/reset-2fa", methods=["POST"])
+def admin_reset_driver_2fa():
+    data = request.get_json(silent=True) or {}
+    driver_id = data.get("driver_id")
+    if not driver_id:
+        return jsonify({"success": False, "message": "driver_id required"}), 400
+
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT user_id, full_name FROM users WHERE user_id = %s AND role = 'Driver' LIMIT 1", (driver_id,))
+        driver = cursor.fetchone()
+        if not driver:
+            cursor.close()
+            conn.close()
+            return jsonify({"success": False, "message": "Driver account not found."}), 404
+
+        cursor.execute("UPDATE driver_2fa SET is_enabled = 0 WHERE user_id = %s", (driver_id,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        print(f"[ADMIN 2FA RESET] Admin reset 2FA for Driver ID {driver_id} ({driver['full_name']}).")
+        return jsonify({
+            "success": True,
+            "message": f"2FA security has been successfully reset for driver '{driver['full_name']}'."
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+
+# ============================================================
+# DRIVER 2FA ROUTE ALIASES FOR COMPATIBILITY
+# ============================================================
+
+@app.route("/driver/<int:driver_id>/2fa/status", methods=["GET"])
+def get_driver_2fa_status_alias(driver_id):
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT is_enabled FROM driver_2fa WHERE user_id = %s LIMIT 1", (driver_id,))
+        rec = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        is_enabled = bool(rec and rec.get("is_enabled") == 1)
+        return jsonify({"success": True, "is_enabled": is_enabled}), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/driver/<int:driver_id>/2fa/request-enable", methods=["POST"])
+@app.route("/driver/<int:driver_id>/2fa/enable", methods=["POST"])
+@app.route("/api/driver/2fa/enable", methods=["POST"])
+def request_enable_2fa_alias(driver_id=None):
+    if not driver_id:
+        data = request.get_json(silent=True) or {}
+        driver_id = data.get("driver_id") or data.get("user_id")
+    return request_enable_2fa_with_id(driver_id)
+
+
+@app.route("/driver/<int:driver_id>/2fa/verify-enable", methods=["POST"])
+@app.route("/driver/<int:driver_id>/2fa/verify", methods=["POST"])
+@app.route("/api/driver/2fa/verify", methods=["POST"])
+def verify_enable_2fa_alias(driver_id=None):
+    data = request.get_json(silent=True) or {}
+    did = driver_id or data.get("driver_id") or data.get("user_id")
+    temp_token = str(data.get("temp_token") or "").strip()
+    otp_input = str(data.get("otp") or data.get("code") or "").strip()
+    return verify_enable_2fa_with_params(did, temp_token, otp_input)
+
+
+
+@app.route("/debug/routes", methods=["GET"])
+def debug_routes():
+    routes = [f"{rule.endpoint}: {rule.rule} {list(rule.methods)}" for rule in app.url_map.iter_rules()]
+    return jsonify({"routes": routes}), 200
+
+
+# ============================================================
+# PARENT ABSENCE & DYNAMIC ITINERARY ENDPOINTS
+# ============================================================
+
+@app.route("/parent/<int:parent_id>/child/<int:child_id>/absence", methods=["POST"])
+def mark_child_absence(parent_id, child_id):
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json(silent=True) or {}
+        absence_date = str(data.get("absence_date") or "").strip()
+        if not absence_date:
+            absence_date = datetime.now().strftime("%Y-%m-%d")
+
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute(
+            "SELECT route_id, pickup_stop_id FROM parent_children WHERE child_id = %s AND parent_id = %s LIMIT 1",
+            (child_id, parent_id)
+        )
+        child_rec = cursor.fetchone()
+        route_id = child_rec.get("route_id") if child_rec else None
+        stop_id = child_rec.get("pickup_stop_id") if child_rec else None
+
+        cursor.execute(
+            """
+            SELECT absence_id FROM child_bus_absence
+            WHERE child_id = %s AND parent_id = %s AND absence_date = %s
+            LIMIT 1
+            """,
+            (child_id, parent_id, absence_date)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            cursor.execute(
+                """
+                UPDATE child_bus_absence
+                SET status = 'Not Riding Today', updated_at = NOW()
+                WHERE absence_id = %s
+                """,
+                (existing["absence_id"],)
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO child_bus_absence (child_id, parent_id, route_id, stop_id, absence_date, status)
+                VALUES (%s, %s, %s, %s, %s, 'Not Riding Today')
+                """,
+                (child_id, parent_id, route_id, stop_id, absence_date)
+            )
+
+        cursor.execute(
+            """
+            SELECT attendance_id FROM student_boarding
+            WHERE child_id = %s AND attendance_date = %s
+            LIMIT 1
+            """,
+            (child_id, absence_date)
+        )
+        sb_rec = cursor.fetchone()
+        if sb_rec:
+            cursor.execute(
+                "UPDATE student_boarding SET boarding_time = NULL WHERE attendance_id = %s",
+                (sb_rec["attendance_id"],)
+            )
+
+        conn.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Child absence marked successfully. Bus driver notified to skip stop.",
+            "is_absent": True,
+            "status": "Not Riding Today"
         }), 200
 
-    except mysql.connector.Error as e:
-        return jsonify({"success": False, "message": f"Database error: {e}"}), 500
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
     finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@app.route("/parent/<int:parent_id>/child/<int:child_id>/absence/cancel", methods=["POST"])
+def cancel_child_absence(parent_id, child_id):
+    conn = None
+    cursor = None
+    try:
+        data = request.get_json(silent=True) or {}
+        absence_date = str(data.get("absence_date") or "").strip()
+        if not absence_date:
+            absence_date = datetime.now().strftime("%Y-%m-%d")
+
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute(
+            """
+            UPDATE child_bus_absence
+            SET status = 'CANCELLED', updated_at = NOW()
+            WHERE child_id = %s AND parent_id = %s AND absence_date = %s
+            """,
+            (child_id, parent_id, absence_date)
+        )
+
+        cursor.execute(
+            """
+            UPDATE student_boarding
+            SET boarding_status = 'Not Boarded', boarding_time = NULL
+            WHERE child_id = %s AND attendance_date = %s AND boarding_status = 'SKIP'
+            """,
+            (child_id, absence_date)
+        )
+
+        conn.commit()
+
+        return jsonify({
+            "success": True,
+            "message": "Absence cancelled successfully. Child restored to bus itinerary.",
+            "is_absent": False,
+            "status": "Riding"
+        }), 200
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@app.route("/parent/<int:parent_id>/child/<int:child_id>/absence", methods=["GET"])
+def get_child_absence(parent_id, child_id):
+    conn = None
+    cursor = None
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        cursor.execute(
+            """
+            SELECT absence_id, absence_date, status, created_at
+            FROM child_bus_absence
+            WHERE child_id = %s AND parent_id = %s AND absence_date = %s AND status != 'CANCELLED'
+            LIMIT 1
+            """,
+            (child_id, parent_id, today)
+        )
+        absence = cursor.fetchone()
+        is_absent = bool(absence is not None)
+
+        return jsonify({
+            "success": True,
+            "is_absent": is_absent,
+            "absence": serialize_row(absence) if absence else None
+        }), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+@app.route("/driver/<int:driver_id>/itinerary", methods=["GET"])
+def get_driver_itinerary(driver_id):
+    conn = None
+    cursor = None
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        cursor.execute(
+            """
+            SELECT b.bus_id, b.route, r.route_id
+            FROM buses b
+            LEFT JOIN users u ON (b.driver_id = u.user_id OR LOWER(TRIM(b.driver_name)) = LOWER(TRIM(u.full_name)))
+            LEFT JOIN routes r ON LOWER(TRIM(b.route)) = LOWER(TRIM(r.route_name))
+            WHERE u.user_id = %s AND u.role = 'Driver'
+            LIMIT 1
+            """,
+            (driver_id,)
+        )
+        bus_rec = cursor.fetchone()
+
+        if not bus_rec or not bus_rec.get("route_id"):
+            return jsonify({
+                "success": True,
+                "stops": [],
+                "skipped_stops_count": 0,
+                "message": "No active route assigned to driver"
+            }), 200
+
+        route_id = bus_rec["route_id"]
+
+        cursor.execute(
+            """
+            SELECT stop_id, stop_name, stop_order, latitude, longitude
+            FROM pickup_stops
+            WHERE route_id = %s
+            ORDER BY stop_order ASC
+            """,
+            (route_id,)
+        )
+        stops = cursor.fetchall() or []
+
+        cursor.execute(
+            """
+            SELECT cba.child_id, cba.stop_id
+            FROM child_bus_absence cba
+            WHERE cba.absence_date = %s AND cba.status != 'CANCELLED'
+            """,
+            (today,)
+        )
+        absent_records = cursor.fetchall() or []
+        absent_child_ids = set(r["child_id"] for r in absent_records)
+
+        cursor.execute(
+            """
+            SELECT pc.child_id, pc.pickup_stop_id, COALESCE(sb.boarding_status, 'Not Boarded') AS boarding_status
+            FROM parent_children pc
+            LEFT JOIN student_boarding sb ON pc.child_id = sb.child_id AND sb.attendance_date = %s
+            WHERE pc.route_id = %s
+            """,
+            (today, route_id)
+        )
+        assigned_students = cursor.fetchall() or []
+
+        processed_stops = []
+        skipped_count = 0
+
+        for stop in stops:
+            stop_dict = serialize_row(stop)
+            stop_id = stop_dict["stop_id"]
+
+            stop_students = [s for s in assigned_students if s.get("pickup_stop_id") == stop_id]
+
+            if stop_students and all(
+                s["child_id"] in absent_child_ids or s.get("boarding_status") == "SKIP"
+                for s in stop_students
+            ):
+                stop_dict["is_skipped"] = True
+                stop_dict["status"] = "SKIPPED"
+                skipped_count += 1
+            else:
+                stop_dict["is_skipped"] = False
+                stop_dict["status"] = "ACTIVE"
+
+            processed_stops.append(stop_dict)
+
+        return jsonify({
+            "success": True,
+            "route_id": route_id,
+            "stops": processed_stops,
+            "skipped_stops_count": skipped_count
+        }), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+# ============================================================
+# GLOBAL JSON ERROR HANDLERS
+# ============================================================
+
+@app.errorhandler(404)
+def handle_404(e):
+    return jsonify({"success": False, "message": "Endpoint or resource not found (404)"}), 404
+
+@app.errorhandler(405)
+def handle_405(e):
+    return jsonify({"success": False, "message": "HTTP Method not allowed (405)"}), 405
+
+@app.errorhandler(500)
+def handle_500(e):
+    return jsonify({"success": False, "message": f"Server internal error: {e}"}), 500
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    return jsonify({"success": False, "message": f"Unhandled server error: {str(e)}"}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))

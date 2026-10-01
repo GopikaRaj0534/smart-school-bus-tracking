@@ -113,7 +113,6 @@ CREATE TABLE IF NOT EXISTS `buses` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 INSERT IGNORE INTO `buses` (`bus_id`, `bus_number`, `registration_number`, `route`, `driver_name`, `status`, `start_point`, `destination`, `driver_id`, `created_at`) VALUES
-(3, '11', NULL, 'Chengannur', 'Quality Driver', 'Active', NULL, NULL, 62, '2026-07-26 22:27:08'),
 (4, '12', NULL, 'Pala', 'Anil', 'Active', NULL, NULL, 8, '2026-08-09 15:52:39'),
 (6, '1', NULL, 'Thiruvalla', 'Benit', 'Active', NULL, NULL, 40, '2026-09-13 21:31:07'),
 (7, '10', NULL, 'Chengannur', 'Ben', 'Active', NULL, NULL, 6, '2026-09-20 20:27:38'),
