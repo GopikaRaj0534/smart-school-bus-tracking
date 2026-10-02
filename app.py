@@ -7119,57 +7119,63 @@ def get_parent_notifications(parent_id):
         notifications = []
 
         # 1. Fetch boarding status logs for parent's children
-        cursor.execute(
-            """
-            SELECT sb.child_id, pc.child_name, sb.boarding_status, sb.created_at, b.bus_number
-            FROM student_boarding sb
-            JOIN parent_children pc ON sb.child_id = pc.child_id
-            LEFT JOIN buses b ON pc.bus_id = b.bus_id
-            WHERE pc.parent_id = %s
-            ORDER BY sb.created_at DESC
-            LIMIT 10
-            """,
-            (parent_id,)
-        )
-        boarding_logs = cursor.fetchall() or []
-        for b in boarding_logs:
-            status = b.get("boarding_status", "NOT_BOARDED")
-            c_name = b.get("child_name", "Child")
-            bus_num = b.get("bus_number") or "N/A"
-            title = f"Boarding Update: {c_name}"
-            msg = f"{c_name} status updated to {status} on Bus {bus_num}."
-            notifications.append({
-                "id": f"board_{b.get('child_id')}_{b.get('created_at')}",
-                "title": title,
-                "message": msg,
-                "type": "boarding",
-                "timestamp": str(b.get("created_at") or "")
-            })
+        try:
+            cursor.execute(
+                """
+                SELECT sb.child_id, pc.child_name, sb.boarding_status, sb.attendance_date, b.bus_number
+                FROM student_boarding sb
+                JOIN parent_children pc ON sb.child_id = pc.child_id
+                LEFT JOIN buses b ON sb.bus_id = b.bus_id
+                WHERE pc.parent_id = %s
+                ORDER BY sb.attendance_date DESC
+                LIMIT 10
+                """,
+                (parent_id,)
+            )
+            boarding_logs = cursor.fetchall() or []
+            for b in boarding_logs:
+                status = b.get("boarding_status", "Not Boarded")
+                c_name = b.get("child_name", "Child")
+                bus_num = b.get("bus_number") or "N/A"
+                title = f"Boarding Update: {c_name}"
+                msg = f"{c_name} status updated to {status} on Bus {bus_num}."
+                notifications.append({
+                    "id": f"board_{b.get('child_id')}_{b.get('attendance_date')}",
+                    "title": title,
+                    "message": msg,
+                    "type": "boarding",
+                    "timestamp": str(b.get("attendance_date") or "")
+                })
+        except Exception as e:
+            print("Error fetching boarding notifications:", e)
 
         # 2. Fetch absence logs for parent's children
-        cursor.execute(
-            """
-            SELECT cba.child_id, pc.child_name, cba.absence_date, cba.status, cba.created_at
-            FROM child_bus_absence cba
-            JOIN parent_children pc ON cba.child_id = pc.child_id
-            WHERE pc.parent_id = %s
-            ORDER BY cba.created_at DESC
-            LIMIT 10
-            """,
-            (parent_id,)
-        )
-        absence_logs = cursor.fetchall() or []
-        for a in absence_logs:
-            c_name = a.get("child_name", "Child")
-            a_date = a.get("absence_date", "")
-            status = a.get("status", "SUBMITTED")
-            notifications.append({
-                "id": f"abs_{a.get('child_id')}_{a.get('created_at')}",
-                "title": f"Absence Notification: {c_name}",
-                "message": f"Absence for {c_name} on {a_date} is {status}.",
-                "type": "absence",
-                "timestamp": str(a.get("created_at") or "")
-            })
+        try:
+            cursor.execute(
+                """
+                SELECT cba.child_id, pc.child_name, cba.absence_date, cba.status, cba.created_at
+                FROM child_bus_absence cba
+                JOIN parent_children pc ON cba.child_id = pc.child_id
+                WHERE pc.parent_id = %s
+                ORDER BY cba.created_at DESC
+                LIMIT 10
+                """,
+                (parent_id,)
+            )
+            absence_logs = cursor.fetchall() or []
+            for a in absence_logs:
+                c_name = a.get("child_name", "Child")
+                a_date = a.get("absence_date", "")
+                status = a.get("status", "SUBMITTED")
+                notifications.append({
+                    "id": f"abs_{a.get('child_id')}_{a.get('created_at')}",
+                    "title": f"Absence Notification: {c_name}",
+                    "message": f"Absence for {c_name} on {a_date} is {status}.",
+                    "type": "absence",
+                    "timestamp": str(a.get("created_at") or "")
+                })
+        except Exception as e:
+            print("Error fetching absence notifications:", e)
 
         if not notifications:
             notifications.append({
@@ -7186,6 +7192,7 @@ def get_parent_notifications(parent_id):
         }), 200
 
     except Exception as e:
+        print("PARENT NOTIFICATIONS ERROR:", e)
         return jsonify({"success": False, "message": str(e)}), 500
     finally:
         if cursor:
