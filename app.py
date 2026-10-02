@@ -3656,8 +3656,8 @@ def get_parent_children(parent_id):
                 ps.latitude,
                 ps.longitude,
 
-                COALESCE(sb.boarding_status, 'Not Boarded') AS boarding_status,
-                sb.boarding_time
+                COALESCE(MAX(sb.boarding_status), 'Not Boarded') AS boarding_status,
+                MAX(sb.boarding_time) AS boarding_time
 
             FROM parent_children pc
 
@@ -3683,7 +3683,23 @@ def get_parent_children(parent_id):
                 ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
 
             WHERE pc.parent_id = %s
-            GROUP BY pc.child_id
+            GROUP BY
+                pc.child_id,
+                pc.child_name,
+                pc.class_name,
+                pc.bus_id,
+                b.bus_number,
+                u_driver.full_name,
+                b.driver_name,
+                u_driver.phone,
+                pc.route_id,
+                r.route_id,
+                r.route_name,
+                b.route,
+                pc.pickup_stop_id,
+                ps.stop_name,
+                ps.latitude,
+                ps.longitude
             ORDER BY pc.child_id ASC
             """,
             (parent_id,)
@@ -3998,8 +4014,8 @@ def get_driver_dashboard(driver_id):
                     ps.stop_name,
                     ps.latitude AS stop_latitude,
                     ps.longitude AS stop_longitude,
-                    COALESCE(sb.boarding_status, 'Not Boarded') AS boarding_status,
-                    sb.boarding_time,
+                    COALESCE(MAX(sb.boarding_status), 'Not Boarded') AS boarding_status,
+                    MAX(sb.boarding_time) AS boarding_time,
                     u_parent.full_name AS parent_name,
                     u_parent.phone AS parent_phone,
                     u_parent.email AS parent_email
@@ -4015,7 +4031,21 @@ def get_driver_dashboard(driver_id):
                 LEFT JOIN student_boarding sb
                     ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
                 WHERE pc.bus_id = %s OR (pc.bus_id IS NULL AND LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s)))
-                GROUP BY pc.child_id
+                GROUP BY
+                    pc.child_id,
+                    pc.child_name,
+                    pc.class_name,
+                    pc.bus_id,
+                    b.bus_number,
+                    pc.route_id,
+                    r.route_name,
+                    pc.pickup_stop_id,
+                    ps.stop_name,
+                    ps.latitude,
+                    ps.longitude,
+                    u_parent.full_name,
+                    u_parent.phone,
+                    u_parent.email
                 ORDER BY pc.child_name ASC
                 """,
                 (bus["bus_id"], bus.get("route"))
@@ -5339,9 +5369,9 @@ def get_driver_assigned_students(driver_id):
                 ps.stop_name,
                 ps.latitude AS stop_latitude,
                 ps.longitude AS stop_longitude,
-                IF(cba.absence_id IS NOT NULL, 'SKIP', COALESCE(sb.boarding_status, 'Not Boarded')) AS boarding_status,
-                IF(cba.absence_id IS NOT NULL, TRUE, FALSE) AS is_absent,
-                sb.boarding_time
+                IF(MAX(cba.absence_id) IS NOT NULL, 'SKIP', COALESCE(MAX(sb.boarding_status), 'Not Boarded')) AS boarding_status,
+                IF(MAX(cba.absence_id) IS NOT NULL, TRUE, FALSE) AS is_absent,
+                MAX(sb.boarding_time) AS boarding_time
             FROM parent_children pc
             LEFT JOIN users u ON pc.parent_id = u.user_id
             LEFT JOIN pickup_stops ps ON pc.pickup_stop_id = ps.stop_id
@@ -5349,7 +5379,18 @@ def get_driver_assigned_students(driver_id):
             LEFT JOIN student_boarding sb ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
             LEFT JOIN child_bus_absence cba ON pc.child_id = cba.child_id AND cba.absence_date = CURDATE() AND cba.status != 'CANCELLED'
             WHERE pc.bus_id = %s OR (pc.bus_id IS NULL AND LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s)))
-            GROUP BY pc.child_id
+            GROUP BY 
+                pc.child_id,
+                pc.child_name,
+                pc.class_name,
+                pc.parent_id,
+                u.full_name,
+                u.phone,
+                u.email,
+                pc.pickup_stop_id,
+                ps.stop_name,
+                ps.latitude,
+                ps.longitude
             ORDER BY pc.child_name ASC
             """,
             (bus["bus_id"], bus.get("route"))
