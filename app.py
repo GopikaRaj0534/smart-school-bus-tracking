@@ -3640,21 +3640,21 @@ def get_parent_children(parent_id):
             """
             SELECT
                 pc.child_id,
-                pc.child_name,
-                pc.class_name,
+                MAX(pc.child_name) AS child_name,
+                MAX(pc.class_name) AS class_name,
 
-                pc.bus_id,
-                b.bus_number,
-                COALESCE(u_driver.full_name, b.driver_name, 'Not Assigned') AS driver_name,
-                u_driver.phone AS driver_phone,
+                MAX(pc.bus_id) AS bus_id,
+                MAX(b.bus_number) AS bus_number,
+                COALESCE(MAX(u_driver.full_name), MAX(b.driver_name), 'Not Assigned') AS driver_name,
+                MAX(u_driver.phone) AS driver_phone,
 
-                COALESCE(pc.route_id, r.route_id) AS route_id,
-                COALESCE(r.route_name, b.route, 'Not Assigned') AS route_name,
+                COALESCE(MAX(pc.route_id), MAX(r.route_id)) AS route_id,
+                COALESCE(MAX(r.route_name), MAX(b.route), 'Not Assigned') AS route_name,
 
-                pc.pickup_stop_id,
-                ps.stop_name,
-                ps.latitude,
-                ps.longitude,
+                MAX(pc.pickup_stop_id) AS pickup_stop_id,
+                MAX(ps.stop_name) AS stop_name,
+                MAX(ps.latitude) AS latitude,
+                MAX(ps.longitude) AS longitude,
 
                 COALESCE(MAX(sb.boarding_status), 'Not Boarded') AS boarding_status,
                 MAX(sb.boarding_time) AS boarding_time
@@ -3683,23 +3683,7 @@ def get_parent_children(parent_id):
                 ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
 
             WHERE pc.parent_id = %s
-            GROUP BY
-                pc.child_id,
-                pc.child_name,
-                pc.class_name,
-                pc.bus_id,
-                b.bus_number,
-                u_driver.full_name,
-                b.driver_name,
-                u_driver.phone,
-                pc.route_id,
-                r.route_id,
-                r.route_name,
-                b.route,
-                pc.pickup_stop_id,
-                ps.stop_name,
-                ps.latitude,
-                ps.longitude
+            GROUP BY pc.child_id
             ORDER BY pc.child_id ASC
             """,
             (parent_id,)
