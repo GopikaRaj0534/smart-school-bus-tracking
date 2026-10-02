@@ -76,6 +76,10 @@ class SQLiteConnectionWrapper:
     def __init__(self, db_path='routesafe.db'):
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.conn.create_function("CURDATE", 0, lambda: datetime.now().strftime("%Y-%m-%d"))
+        self.conn.create_function("curdate", 0, lambda: datetime.now().strftime("%Y-%m-%d"))
+        self.conn.create_function("NOW", 0, lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        self.conn.create_function("now", 0, lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     def cursor(self, dictionary=True, buffered=True):
         return SQLiteDictCursor(self.conn)

@@ -70,42 +70,114 @@ class _PendingDriverRequestsScreenState
   // ============================================================
 
   Future<void> _approveDriver(int driverId, String driverName) async {
+    List<Map<String, dynamic>> availableBuses = [];
+    bool loadingBuses = true;
+    int? selectedBusId;
+
+    try {
+      final res = await ApiService.getAvailableBuses();
+      if (res['success'] == true && res['buses'] is List) {
+        availableBuses = List<Map<String, dynamic>>.from(res['buses']);
+      }
+    } catch (_) {}
+    loadingBuses = false;
+
+    if (!mounted) return;
+
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.check_circle_outline, color: AppColors.success, size: 28),
-            SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Assign Driver',
-                overflow: TextOverflow.ellipsis,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Row(
+                children: [
+                  Icon(Icons.check_circle_outline, color: AppColors.success, size: 28),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Assign Driver',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
-        content: Text(
-          'Assign registration request for $driverName?',
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.success,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Approve'),
-          ),
-        ],
-      ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Approve registration request for $driverName?',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Assign Unassigned Bus (Optional):',
+                      style: TextStyle(fontSize: 13, color: AppColors.textSecondary, fontWeight: FontWeight.w500),
+                    ),
+                    const SizedBox(height: 8),
+                    if (loadingBuses)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8.0),
+                        child: CircularProgressIndicator(),
+                      )
+                    else
+                      DropdownButtonFormField<int?>(
+                        initialValue: selectedBusId,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        ),
+                        hint: const Text('None (Assign Later)'),
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text('None (Assign Later)'),
+                          ),
+                          ...availableBuses.map((bus) {
+                            final bId = bus['bus_id'] as int?;
+                            final bNum = bus['bus_number']?.toString() ?? '';
+                            final route = bus['route']?.toString() ?? '';
+                            return DropdownMenuItem<int?>(
+                              value: bId,
+                              child: Text(
+                                'Bus $bNum ${route.isNotEmpty ? "($route)" : ""}',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            );
+                          }),
+                        ],
+                        onChanged: (val) {
+                          setDialogState(() {
+                            selectedBusId = val;
+                          });
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.success,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Assign'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
 
     if (confirm != true || !mounted) return;
@@ -113,6 +185,7 @@ class _PendingDriverRequestsScreenState
     try {
       final result = await ApiService.approveDriver(
         driverId: driverId,
+        busId: selectedBusId,
       );
 
       if (!mounted) return;
