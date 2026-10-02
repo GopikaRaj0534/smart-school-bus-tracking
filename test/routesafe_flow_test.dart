@@ -18,7 +18,7 @@ void main() {
     });
 
     test('TC03: Valid Driver Login', () async {
-      final res = await ApiService.login(email: 'benit@gmail.com', password: 'driver123', role: 'driver');
+      final res = await ApiService.login(email: 'benit@gmail.com', password: 'benit123', role: 'driver');
       expect(res['success'], equals(true));
       expect(res['user']['user_id'], equals(40));
     });
