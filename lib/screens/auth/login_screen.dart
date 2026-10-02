@@ -481,10 +481,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             useGradient: true,
                             onPressed: login,
                           ),
-                          const SizedBox(height: 16),
-
-                          // Register Redirection Footer
-                          if (selectedRole != "Admin")
+                          // Register Redirection Footer (Parents and Drivers only)
+                          if (selectedRole != "Admin") ...[
+                            const SizedBox(height: 16),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
@@ -515,6 +514,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               ],
                             ),
+                          ],
                         ],
                       ),
                     ),
