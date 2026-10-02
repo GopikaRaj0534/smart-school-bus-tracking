@@ -42,6 +42,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> submitRegistration() async {
+    if (role == "Admin") {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Admin registration is not permitted."),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
+    }
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => isLoading = true);
@@ -221,7 +230,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         SizedBox(height: 2),
                         Text(
-                          "Register a new Parent, Driver, or Admin account",
+                          "Register a new Parent or Driver account",
                           style: TextStyle(color: Colors.white70, fontSize: 12),
                         ),
                       ],
@@ -258,7 +267,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         children: [
                           roleOption("Parent", Icons.family_restroom_rounded),
                           roleOption("Driver", Icons.directions_bus_rounded),
-                          roleOption("Admin", Icons.admin_panel_settings_rounded),
                         ],
                       ),
                       const SizedBox(height: 20),

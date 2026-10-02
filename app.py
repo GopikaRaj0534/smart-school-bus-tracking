@@ -336,7 +336,14 @@ def register():
                 "message": "Password is required"
             }), 400
 
-        if role not in ["Admin", "Driver", "Parent"]:
+        if role == "Admin":
+
+            return jsonify({
+                "success": False,
+                "message": "Admin self-registration is disabled. Please contact system administrator."
+            }), 403
+
+        if role not in ["Driver", "Parent"]:
 
             return jsonify({
                 "success": False,
