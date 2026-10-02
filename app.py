@@ -7106,6 +7106,98 @@ def get_driver_itinerary(driver_id):
 
 
 # ============================================================
+# PARENT NOTIFICATIONS
+# ============================================================
+
+@app.route("/parent/<int:parent_id>/notifications", methods=["GET"])
+def get_parent_notifications(parent_id):
+    conn = None
+    cursor = None
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+        notifications = []
+
+        # 1. Fetch boarding status logs for parent's children
+        cursor.execute(
+            """
+            SELECT sb.child_id, pc.child_name, sb.boarding_status, sb.updated_at, b.bus_number
+            FROM student_boarding sb
+            JOIN parent_children pc ON sb.child_id = pc.child_id
+            LEFT JOIN buses b ON pc.bus_id = b.bus_id
+            WHERE pc.parent_id = %s
+            ORDER BY sb.updated_at DESC
+            LIMIT 10
+            """,
+            (parent_id,)
+        )
+        boarding_logs = cursor.fetchall() or []
+        for b in boarding_logs:
+            status = b.get("boarding_status", "NOT_BOARDED")
+            c_name = b.get("child_name", "Child")
+            bus_num = b.get("bus_number") or "N/A"
+            title = f"Boarding Update: {c_name}"
+            msg = f"{c_name} status updated to {status} on Bus {bus_num}."
+            notifications.append({
+                "id": f"board_{b.get('child_id')}_{b.get('updated_at')}",
+                "title": title,
+                "message": msg,
+                "type": "boarding",
+                "timestamp": str(b.get("updated_at") or "")
+            })
+
+        # 2. Fetch absence logs for parent's children
+        cursor.execute(
+            """
+            SELECT cba.child_id, pc.child_name, cba.absence_date, cba.status, cba.created_at
+            FROM child_bus_absence cba
+            JOIN parent_children pc ON cba.child_id = pc.child_id
+            WHERE pc.parent_id = %s
+            ORDER BY cba.created_at DESC
+            LIMIT 10
+            """,
+            (parent_id,)
+        )
+        absence_logs = cursor.fetchall() or []
+        for a in absence_logs:
+            c_name = a.get("child_name", "Child")
+            a_date = a.get("absence_date", "")
+            status = a.get("status", "SUBMITTED")
+            notifications.append({
+                "id": f"abs_{a.get('child_id')}_{a.get('created_at')}",
+                "title": f"Absence Notification: {c_name}",
+                "message": f"Absence for {c_name} on {a_date} is {status}.",
+                "type": "absence",
+                "timestamp": str(a.get("created_at") or "")
+            })
+
+        if not notifications:
+            notifications.append({
+                "id": "welcome_1",
+                "title": "Welcome to RouteSafe",
+                "message": "System alerts and child trip status updates will appear here.",
+                "type": "system",
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+        return jsonify({
+            "success": True,
+            "notifications": notifications
+        }), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
+
+
+
+# ============================================================
 # GLOBAL JSON ERROR HANDLERS
 # ============================================================
 
