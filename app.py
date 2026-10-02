@@ -772,13 +772,13 @@ def get_parent_requests():
         cursor.execute(
             """
             SELECT
-                COALESCE(pr.request_id, u.user_id) AS request_id,
+                COALESCE(MAX(pr.request_id), u.user_id) AS request_id,
                 u.user_id,
                 u.full_name,
                 u.email,
                 u.phone,
-                COALESCE(pr.child_name, pc.child_name, 'Not provided') AS child_name,
-                COALESCE(pr.child_class, pc.class_name, 'Not provided') AS child_class,
+                COALESCE(MAX(pr.child_name), MAX(pc.child_name), 'Not provided') AS child_name,
+                COALESCE(MAX(pr.child_class), MAX(pc.class_name), 'Not provided') AS child_class,
                 u.status,
                 u.created_at
             FROM users u
@@ -788,7 +788,7 @@ def get_parent_requests():
                 ON u.user_id = pc.parent_id
             WHERE u.role = 'Parent'
               AND (UPPER(TRIM(u.status)) = 'PENDING' OR (pr.status IS NOT NULL AND UPPER(TRIM(pr.status)) = 'PENDING'))
-            GROUP BY u.user_id
+            GROUP BY u.user_id, u.full_name, u.email, u.phone, u.status, u.created_at
             ORDER BY u.created_at DESC
             """
         )

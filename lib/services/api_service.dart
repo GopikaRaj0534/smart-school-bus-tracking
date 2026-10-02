@@ -41,12 +41,7 @@ class ApiService {
       return _cachedBaseUrl!;
     }
 
-    // Use live HTTPS Render backend for Release builds; use local Flask server for Debug/Tests
-    if (kReleaseMode) {
-      return defaultProductionUrl;
-    }
-
-    return 'http://127.0.0.1:5000';
+    return defaultProductionUrl;
   }
 
   // ============================================================
