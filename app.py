@@ -7121,12 +7121,12 @@ def get_parent_notifications(parent_id):
         # 1. Fetch boarding status logs for parent's children
         cursor.execute(
             """
-            SELECT sb.child_id, pc.child_name, sb.boarding_status, sb.updated_at, b.bus_number
+            SELECT sb.child_id, pc.child_name, sb.boarding_status, sb.created_at, b.bus_number
             FROM student_boarding sb
             JOIN parent_children pc ON sb.child_id = pc.child_id
             LEFT JOIN buses b ON pc.bus_id = b.bus_id
             WHERE pc.parent_id = %s
-            ORDER BY sb.updated_at DESC
+            ORDER BY sb.created_at DESC
             LIMIT 10
             """,
             (parent_id,)
@@ -7139,11 +7139,11 @@ def get_parent_notifications(parent_id):
             title = f"Boarding Update: {c_name}"
             msg = f"{c_name} status updated to {status} on Bus {bus_num}."
             notifications.append({
-                "id": f"board_{b.get('child_id')}_{b.get('updated_at')}",
+                "id": f"board_{b.get('child_id')}_{b.get('created_at')}",
                 "title": title,
                 "message": msg,
                 "type": "boarding",
-                "timestamp": str(b.get("updated_at") or "")
+                "timestamp": str(b.get("created_at") or "")
             })
 
         # 2. Fetch absence logs for parent's children
