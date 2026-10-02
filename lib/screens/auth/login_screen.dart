@@ -482,7 +482,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             onPressed: login,
                           ),
                           // Register Redirection Footer (Parents and Drivers only)
-                          if (selectedRole != "Admin") ...[
+                          if (selectedRole.toLowerCase() != "admin") ...[
                             const SizedBox(height: 16),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
