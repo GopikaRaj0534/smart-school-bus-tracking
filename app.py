@@ -3541,54 +3541,59 @@ def get_parent_dashboard(parent_id):
             eta = "ETA: Not available"
 
             if bus_id:
-                # Check for active trip for this bus
-                cursor.execute(
-                    """
-                    SELECT dt.trip_id, dt.driver_id, dl.latitude AS driver_lat, dl.longitude AS driver_lng
-                    FROM driver_trips dt
-                    LEFT JOIN (
-                        SELECT dl1.driver_id, dl1.latitude, dl1.longitude
-                        FROM driver_locations dl1
-                        INNER JOIN (
-                            SELECT driver_id, MAX(location_id) AS max_loc_id
-                            FROM driver_locations
-                            GROUP BY driver_id
-                        ) latest ON dl1.location_id = latest.max_loc_id
-                    ) dl ON dt.driver_id = dl.driver_id
-                    WHERE dt.bus_id = %s AND dt.status = 'Active'
-                    ORDER BY dt.trip_id DESC
-                    LIMIT 1
-                    """,
-                    (bus_id,)
-                )
-                active_trip = cursor.fetchone()
+                try:
+                    # Check for active trip for this bus
+                    cursor.execute(
+                        """
+                        SELECT dt.trip_id, dt.driver_id, dl.latitude AS driver_lat, dl.longitude AS driver_lng
+                        FROM driver_trips dt
+                        LEFT JOIN (
+                            SELECT dl1.driver_id, dl1.latitude, dl1.longitude
+                            FROM driver_locations dl1
+                            INNER JOIN (
+                                SELECT driver_id, MAX(location_id) AS max_loc_id
+                                FROM driver_locations
+                                GROUP BY driver_id
+                            ) latest ON dl1.location_id = latest.max_loc_id
+                        ) dl ON dt.driver_id = dl.driver_id
+                        WHERE dt.bus_id = %s AND dt.status = 'Active'
+                        ORDER BY dt.trip_id DESC
+                        LIMIT 1
+                        """,
+                        (bus_id,)
+                    )
+                    active_trip = cursor.fetchone()
 
-                if active_trip:
-                    trip_status = "On Route"
-                    driver_lat = active_trip.get("driver_lat")
-                    driver_lng = active_trip.get("driver_lng")
-                    stop_lat = child_dict.get("latitude")
-                    stop_lng = child_dict.get("longitude")
+                    if active_trip:
+                        trip_status = "On Route"
+                        driver_lat = active_trip.get("driver_lat")
+                        driver_lng = active_trip.get("driver_lng")
+                        stop_lat = child_dict.get("latitude")
+                        stop_lng = child_dict.get("longitude")
 
-                    if driver_lat and driver_lng and stop_lat and stop_lng:
-                        try:
-                            import math
-                            lat1, lon1 = float(driver_lat), float(driver_lng)
-                            lat2, lon2 = float(stop_lat), float(stop_lng)
-                            dlat = math.radians(lat2 - lat1)
-                            dlon = math.radians(lon2 - lon1)
-                            a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
-                            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-                            dist_km = 6371 * c
-                            minutes = int((dist_km / 30.0) * 60)
-                            if minutes < 1:
-                                minutes = 1
-                            eta = f"{minutes} min"
-                        except Exception:
+                        if driver_lat and driver_lng and stop_lat and stop_lng:
+                            try:
+                                import math
+                                lat1, lon1 = float(driver_lat), float(driver_lng)
+                                lat2, lon2 = float(stop_lat), float(stop_lng)
+                                dlat = math.radians(lat2 - lat1)
+                                dlon = math.radians(lon2 - lon1)
+                                a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
+                                c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+                                dist_km = 6371 * c
+                                minutes = int((dist_km / 30.0) * 60)
+                                if minutes < 1:
+                                    minutes = 1
+                                eta = f"{minutes} min"
+                            except Exception:
+                                eta = "ETA: Not available"
+                        else:
                             eta = "ETA: Not available"
                     else:
+                        trip_status = "Not Started"
                         eta = "ETA: Not available"
-                else:
+                except Exception as sub_e:
+                    print("Error checking active trip in parent dashboard:", sub_e)
                     trip_status = "Not Started"
                     eta = "ETA: Not available"
             else:
