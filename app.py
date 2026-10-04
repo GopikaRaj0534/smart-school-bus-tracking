@@ -3864,22 +3864,28 @@ def get_parent_child_location(parent_id, child_id):
         # ----------------------------------------------------
 
         location = None
+        is_demo = False
         if child.get("driver_id"):
-            cursor.execute(
-                """
-                SELECT
-                    driver_id,
-                    latitude,
-                    longitude,
-                    updated_at
-                FROM driver_locations
-                WHERE driver_id = %s
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """,
-                (child["driver_id"],)
-            )
-            location = cursor.fetchone()
+            driver_id_val = child["driver_id"]
+            if driver_id_val in DEMO_LOCATIONS:
+                location = DEMO_LOCATIONS[driver_id_val]
+                is_demo = True
+            else:
+                cursor.execute(
+                    """
+                    SELECT
+                        driver_id,
+                        latitude,
+                        longitude,
+                        updated_at
+                    FROM driver_locations
+                    WHERE driver_id = %s
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    (driver_id_val,)
+                )
+                location = cursor.fetchone()
 
         # ----------------------------------------------------
         # TODAY'S STUDENT BOARDING STATUS
@@ -3910,10 +3916,11 @@ def get_parent_child_location(parent_id, child_id):
         return jsonify({
             "success": True,
             "child": child_data,
-            "is_trip_active": is_trip_active,
+            "is_trip_active": is_trip_active or is_demo,
+            "is_demo": is_demo,
             "location": (
                 serialize_row(location)
-                if (location and is_trip_active)
+                if (location and (is_trip_active or is_demo))
                 else None
             ),
             "stops": [serialize_row(s) for s in route_stops]
@@ -4380,6 +4387,8 @@ def end_driver_trip(driver_id):
 # UPDATE DRIVER LOCATION
 # ============================================================
 
+DEMO_LOCATIONS = {}
+
 @app.route(
     "/driver/<int:driver_id>/location",
     methods=["POST"]
@@ -4394,8 +4403,8 @@ def update_driver_location(driver_id):
         data = request.get_json(silent=True) or {}
 
         latitude = data.get("latitude")
-        
         longitude = data.get("longitude")
+        is_demo = bool(data.get("is_demo") or data.get("isDemo"))
 
         if latitude is None or longitude is None:
 
@@ -4407,7 +4416,6 @@ def update_driver_location(driver_id):
         try:
 
             latitude = float(latitude)
-        
             longitude = float(longitude)
 
         except (ValueError, TypeError):
@@ -4452,6 +4460,25 @@ def update_driver_location(driver_id):
                 "message": "Driver not found"
             }), 404
 
+        if is_demo:
+            demo_obj = {
+                "driver_id": driver_id,
+                "latitude": latitude,
+                "longitude": longitude,
+                "updated_at": datetime.now().isoformat(),
+                "is_demo": True
+            }
+            DEMO_LOCATIONS[driver_id] = demo_obj
+            return jsonify({
+                "success": True,
+                "message": "Demo driver location updated successfully",
+                "location": demo_obj,
+                "is_demo": True
+            }), 200
+
+        # Clear demo entry when switching back to real GPS
+        DEMO_LOCATIONS.pop(driver_id, None)
+
         cursor.execute(
             """
             INSERT INTO driver_locations
@@ -4482,7 +4509,8 @@ def update_driver_location(driver_id):
                 "driver_id": driver_id,
                 "latitude": latitude,
                 "longitude": longitude
-            }
+            },
+            "is_demo": False
         }), 200
 
     except mysql.connector.Error as e:
@@ -4540,6 +4568,13 @@ def get_driver_location(driver_id):
                 "message": "Driver not found"
             }), 404
 
+        if driver_id in DEMO_LOCATIONS:
+            return jsonify({
+                "success": True,
+                "is_demo": True,
+                "location": DEMO_LOCATIONS[driver_id]
+            }), 200
+
         cursor.execute(
             """
             SELECT
@@ -4558,6 +4593,7 @@ def get_driver_location(driver_id):
 
         return jsonify({
             "success": True,
+            "is_demo": False,
             "location": (
                 serialize_row(location)
                 if location

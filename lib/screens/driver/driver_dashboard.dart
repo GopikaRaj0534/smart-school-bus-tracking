@@ -52,6 +52,7 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
   DateTime? _lastGpsTime;
   double? _currentLat;
   double? _currentLng;
+  bool _isDemoMode = false;
 
   @override
   void initState() {
@@ -591,12 +592,16 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
   Future<void> _sendLocationToBackend(double lat, double lng) async {
     try {
       final busId = assignedBus != null ? (assignedBus!['bus_id'] ?? assignedBus!['id']) : null;
-      debugPrint('Sending GPS location update to Flask backend: Lat=$lat, Lng=$lng, DriverID=${widget.driverId}, BusID=$busId');
+      final double sendLat = _isDemoMode ? 9.5546 : lat;
+      final double sendLng = _isDemoMode ? 76.7871 : lng;
+
+      debugPrint('Sending GPS location update to Flask backend: Lat=$sendLat, Lng=$sendLng, DriverID=${widget.driverId}, BusID=$busId, isDemo=$_isDemoMode');
 
       final res = await ApiService.updateDriverLocation(
         driverId: widget.driverId,
-        latitude: lat,
-        longitude: lng,
+        latitude: sendLat,
+        longitude: sendLng,
+        isDemo: _isDemoMode,
       );
 
       debugPrint('Location update API response: $res');
@@ -604,8 +609,8 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
       if (res['success'] == true) {
         if (mounted) {
           setState(() {
-            _currentLat = lat;
-            _currentLng = lng;
+            _currentLat = sendLat;
+            _currentLng = sendLng;
             _lastGpsTime = DateTime.now();
           });
         }
@@ -1729,11 +1734,90 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
               ),
             ),
           ),
+          const SizedBox(height: 12),
+
+          // Demo Location Simulation Toggle Card
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            color: _isDemoMode ? Colors.amber.shade50 : null,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.science_rounded,
+                            color: _isDemoMode ? Colors.amber.shade900 : AppColors.textSecondary,
+                          ),
+                          const SizedBox(width: 10),
+                          const Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Demo Location Simulation',
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                              ),
+                              Text(
+                                'Kanjirapally Route Simulation',
+                                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      Switch(
+                        value: _isDemoMode,
+                        activeColor: Colors.amber.shade800,
+                        onChanged: (val) {
+                          setState(() {
+                            _isDemoMode = val;
+                          });
+                          if (val) {
+                            _sendLocationToBackend(9.5546, 76.7871);
+                          } else {
+                            _updateCurrentGpsLocation();
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  if (_isDemoMode) ...[
+                    const Divider(),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline, color: Colors.amber.shade900, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Simulating location at Kanjirapally (9.554600, 76.787100). Parent map will display this simulated bus position in real time.',
+                              style: TextStyle(fontSize: 12, color: Colors.amber.shade900, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 16),
           TrackingMapCard(
             busNumber: busNumber,
             routeLabel: routeName,
-            isTripActive: tripActive,
+            isTripActive: tripActive || _isDemoMode,
+            isDemoMode: _isDemoMode,
             busLat: _currentLat,
             busLng: _currentLng,
             routeStops: routeStops,

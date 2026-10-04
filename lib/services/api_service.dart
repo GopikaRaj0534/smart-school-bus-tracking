@@ -507,12 +507,14 @@ class ApiService {
     required int driverId,
     required double latitude,
     required double longitude,
+    bool isDemo = false,
   }) async {
     return _post(
       '/driver/$driverId/location',
       {
         'latitude': latitude,
         'longitude': longitude,
+        'is_demo': isDemo,
       },
     );
   }
