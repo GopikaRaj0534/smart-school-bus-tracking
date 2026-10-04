@@ -563,7 +563,7 @@ class _TrackingMapCardState extends State<TrackingMapCard> {
                             Icon(Icons.science_rounded, color: Colors.white, size: 14),
                             SizedBox(width: 5),
                             Text(
-                              "DEMO MODE - Kanjirapally",
+                              "DEMO MODE - Alappuzha",
                               style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 11,

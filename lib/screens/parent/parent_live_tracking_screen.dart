@@ -146,7 +146,7 @@ class _ParentLiveTrackingScreenState extends State<ParentLiveTrackingScreen> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              "DEMO MODE ACTIVE: Bus location is currently simulated at Kanjirapally.",
+                              "DEMO MODE ACTIVE: Bus location is currently simulated at Alappuzha.",
                               style: TextStyle(
                                 color: Colors.amber.shade900,
                                 fontWeight: FontWeight.bold,

@@ -592,8 +592,8 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
   Future<void> _sendLocationToBackend(double lat, double lng) async {
     try {
       final busId = assignedBus != null ? (assignedBus!['bus_id'] ?? assignedBus!['id']) : null;
-      final double sendLat = _isDemoMode ? 9.5546 : lat;
-      final double sendLng = _isDemoMode ? 76.7871 : lng;
+      final double sendLat = _isDemoMode ? 9.4981 : lat;
+      final double sendLng = _isDemoMode ? 76.3388 : lng;
 
       debugPrint('Sending GPS location update to Flask backend: Lat=$sendLat, Lng=$sendLng, DriverID=${widget.driverId}, BusID=$busId, isDemo=$_isDemoMode');
 
@@ -1763,7 +1763,7 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
                                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                               ),
                               Text(
-                                'Kanjirapally Route Simulation',
+                                'Alappuzha Route Simulation',
                                 style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                               ),
                             ],
@@ -1778,7 +1778,7 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
                             _isDemoMode = val;
                           });
                           if (val) {
-                            _sendLocationToBackend(9.5546, 76.7871);
+                            _sendLocationToBackend(9.4981, 76.3388);
                           } else {
                             _updateCurrentGpsLocation();
                           }
@@ -1800,7 +1800,7 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Simulating location at Kanjirapally (9.554600, 76.787100). Parent map will display this simulated bus position in real time.',
+                              'Simulating location at Alappuzha (9.498100, 76.338800). Parent map will display this simulated bus position in real time.',
                               style: TextStyle(fontSize: 12, color: Colors.amber.shade900, fontWeight: FontWeight.w600),
                             ),
                           ),
