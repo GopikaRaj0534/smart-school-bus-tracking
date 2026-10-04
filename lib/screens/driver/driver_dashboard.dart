@@ -1772,7 +1772,7 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
                       ),
                       Switch(
                         value: _isDemoMode,
-                        activeColor: Colors.amber.shade800,
+                        activeThumbColor: Colors.amber.shade800,
                         onChanged: (val) {
                           setState(() {
                             _isDemoMode = val;

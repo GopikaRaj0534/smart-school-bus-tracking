@@ -534,6 +534,8 @@ class _TrackingMapCardState extends State<TrackingMapCard> {
                                 );
                               } catch (_) {}
                             },
+                            child: const Icon(Icons.my_location_rounded, size: 18),
+                          ),
                         ],
                       ],
                     ),
