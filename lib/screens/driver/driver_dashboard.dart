@@ -1095,11 +1095,16 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
             ),
             const SizedBox(height: 16),
 
+            // Demo Location Simulation Toggle Card
+            _buildDemoToggleCard(),
+            const SizedBox(height: 16),
+
             // Map Preview Card
             TrackingMapCard(
               busNumber: busNumber,
               routeLabel: routeName,
-              isTripActive: tripActive,
+              isTripActive: tripActive || _isDemoMode,
+              isDemoMode: _isDemoMode,
               busLat: _currentLat,
               busLng: _currentLng,
               routeStops: routeStops,
@@ -1108,7 +1113,20 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
                   ? "${_lastGpsTime!.hour}:${_lastGpsTime!.minute.toString().padLeft(2, '0')}:${_lastGpsTime!.second.toString().padLeft(2, '0')}"
                   : null,
             ),
-            if (_lastGpsTime != null && _currentLat != null && _currentLng != null) ...[
+            if (_isDemoMode) ...[
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.science_rounded, size: 14, color: Colors.amber.shade900),
+                  const SizedBox(width: 6),
+                  Text(
+                    'DEMO MODE Active (Alappuzha: 9.498100, 76.338800)',
+                    style: TextStyle(fontSize: 12, color: Colors.amber.shade900, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ] else if (_lastGpsTime != null && _currentLat != null && _currentLng != null) ...[
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1685,6 +1703,88 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
 
 
 
+  Widget _buildDemoToggleCard() {
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: _isDemoMode ? Colors.amber.shade50 : null,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.science_rounded,
+                      color: _isDemoMode ? Colors.amber.shade900 : AppColors.textSecondary,
+                    ),
+                    const SizedBox(width: 10),
+                    const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Demo Location Simulation',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          'Alappuzha Route Simulation',
+                          style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                Switch(
+                  value: _isDemoMode,
+                  activeThumbColor: Colors.amber.shade800,
+                  onChanged: (val) {
+                    setState(() {
+                      _isDemoMode = val;
+                      if (val) {
+                        _currentLat = 9.4981;
+                        _currentLng = 76.3388;
+                      }
+                    });
+                    if (val) {
+                      _sendLocationToBackend(9.4981, 76.3388);
+                    } else {
+                      _updateCurrentGpsLocation();
+                    }
+                  },
+                ),
+              ],
+            ),
+            if (_isDemoMode) ...[
+              const Divider(),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.amber.shade900, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Simulating location at Alappuzha (9.498100, 76.338800). Parent map will display this simulated bus position in real time.',
+                        style: TextStyle(fontSize: 12, color: Colors.amber.shade900, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   // ============================================================
   // TAB 5: LIVE LOCATION
   // ============================================================
@@ -1737,81 +1837,7 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
           const SizedBox(height: 12),
 
           // Demo Location Simulation Toggle Card
-          Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            color: _isDemoMode ? Colors.amber.shade50 : null,
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.science_rounded,
-                            color: _isDemoMode ? Colors.amber.shade900 : AppColors.textSecondary,
-                          ),
-                          const SizedBox(width: 10),
-                          const Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Demo Location Simulation',
-                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                              ),
-                              Text(
-                                'Alappuzha Route Simulation',
-                                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      Switch(
-                        value: _isDemoMode,
-                        activeThumbColor: Colors.amber.shade800,
-                        onChanged: (val) {
-                          setState(() {
-                            _isDemoMode = val;
-                          });
-                          if (val) {
-                            _sendLocationToBackend(9.4981, 76.3388);
-                          } else {
-                            _updateCurrentGpsLocation();
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  if (_isDemoMode) ...[
-                    const Divider(),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.shade100,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.info_outline, color: Colors.amber.shade900, size: 18),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Simulating location at Alappuzha (9.498100, 76.338800). Parent map will display this simulated bus position in real time.',
-                              style: TextStyle(fontSize: 12, color: Colors.amber.shade900, fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
+          _buildDemoToggleCard(),
           const SizedBox(height: 16),
           TrackingMapCard(
             busNumber: busNumber,
