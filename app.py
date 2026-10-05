@@ -31,7 +31,61 @@ CORS(app)
 # DATABASE CONFIGURATION & RESILIENT FALLBACK WRAPPER
 # ============================================================
 
+from zoneinfo import ZoneInfo
 import sqlite3
+
+# ============================================================
+# TIMEZONE & DATETIME HELPERS (Asia/Kolkata - IST UTC+05:30)
+# ============================================================
+
+IST_TZ = ZoneInfo("Asia/Kolkata")
+
+def get_ist_now():
+    return datetime.now(IST_TZ)
+
+def get_ist_date_str():
+    return datetime.now(IST_TZ).strftime("%Y-%m-%d")
+
+def get_ist_time_str():
+    return datetime.now(IST_TZ).strftime("%H:%M:%S")
+
+def get_ist_datetime_str():
+    return datetime.now(IST_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+def format_time_to_12h(val):
+    if not val:
+        return None
+    if isinstance(val, timedelta):
+        tot_sec = int(val.total_seconds())
+        hrs = (tot_sec // 3600) % 24
+        mins = (tot_sec % 3600) // 60
+        ampm = "AM" if hrs < 12 else "PM"
+        hrs_12 = hrs % 12
+        if hrs_12 == 0: hrs_12 = 12
+        return f"{hrs_12:02d}:{mins:02d} {ampm}"
+    if isinstance(val, datetime):
+        if val.tzinfo is not None:
+            val = val.astimezone(IST_TZ)
+        return val.strftime("%I:%M %p")
+    if hasattr(val, "strftime"):
+        return val.strftime("%I:%M %p")
+    val_str = str(val).strip()
+    if not val_str:
+        return None
+    if re.match(r"^\d{1,2}:\d{2}\s*(AM|PM|am|pm)$", val_str, re.IGNORECASE):
+        return val_str.upper()
+    try:
+        parts = val_str.split(":")
+        if len(parts) >= 2:
+            hrs = int(parts[0]) % 24
+            mins = int(parts[1])
+            ampm = "AM" if hrs < 12 else "PM"
+            hrs_12 = hrs % 12
+            if hrs_12 == 0: hrs_12 = 12
+            return f"{hrs_12:02d}:{mins:02d} {ampm}"
+    except Exception:
+        pass
+    return val_str
 
 class SQLiteDictCursor:
     def __init__(self, conn):
@@ -76,10 +130,12 @@ class SQLiteConnectionWrapper:
     def __init__(self, db_path='routesafe.db'):
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.create_function("CURDATE", 0, lambda: datetime.now().strftime("%Y-%m-%d"))
-        self.conn.create_function("curdate", 0, lambda: datetime.now().strftime("%Y-%m-%d"))
-        self.conn.create_function("NOW", 0, lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        self.conn.create_function("now", 0, lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        self.conn.create_function("CURDATE", 0, get_ist_date_str)
+        self.conn.create_function("curdate", 0, get_ist_date_str)
+        self.conn.create_function("CURTIME", 0, get_ist_time_str)
+        self.conn.create_function("curtime", 0, get_ist_time_str)
+        self.conn.create_function("NOW", 0, get_ist_datetime_str)
+        self.conn.create_function("now", 0, get_ist_datetime_str)
 
     def cursor(self, dictionary=True, buffered=True):
         return SQLiteDictCursor(self.conn)
@@ -113,7 +169,14 @@ def get_db():
     config = get_db_config()
     # 1. Try configured MySQL host
     try:
-        return mysql.connector.connect(**config)
+        conn = mysql.connector.connect(**config)
+        try:
+            cur = conn.cursor()
+            cur.execute("SET time_zone = '+05:30'")
+            cur.close()
+        except Exception:
+            pass
+        return conn
     except Exception as e:
         print(f"[DATABASE NOTICE] Primary DB connection to {config.get('host')}:{config.get('port')} failed: {e}")
 
@@ -127,7 +190,14 @@ def get_db():
                 "password": os.environ.get("MYSQL_PASSWORD", os.environ.get("DB_PASSWORD", "")),
                 "database": os.environ.get("MYSQL_DATABASE", os.environ.get("DB_NAME", "routesafe_db"))
             }
-            return mysql.connector.connect(**local_config)
+            conn = mysql.connector.connect(**local_config)
+            try:
+                cur = conn.cursor()
+                cur.execute("SET time_zone = '+05:30'")
+                cur.close()
+            except Exception:
+                pass
+            return conn
         except Exception as local_err:
             print(f"[DATABASE NOTICE] Local MySQL connection failed: {local_err}")
 
@@ -149,17 +219,24 @@ def serialize_row(row):
 
     for key, value in row.items():
 
-        if isinstance(value, datetime):
-            result[key] = value.isoformat()
+        if value is None:
+            result[key] = None
+
+        elif key in ("boarding_time", "drop_off_time"):
+            result[key] = format_time_to_12h(value)
+
+        elif isinstance(value, datetime):
+            if value.tzinfo is not None:
+                value_ist = value.astimezone(IST_TZ)
+            else:
+                value_ist = value
+            if key in ("start_time", "end_time", "created_at", "updated_at", "timestamp"):
+                result[key] = value_ist.strftime("%Y-%m-%d %I:%M %p")
+            else:
+                result[key] = value_ist.isoformat()
 
         elif isinstance(value, timedelta):
-            tot_sec = int(value.total_seconds())
-            hrs = (tot_sec // 3600) % 24
-            mins = (tot_sec % 3600) // 60
-            ampm = "AM" if hrs < 12 else "PM"
-            hrs = hrs % 12
-            if hrs == 0: hrs = 12
-            result[key] = f"{hrs:02d}:{mins:02d} {ampm}"
+            result[key] = format_time_to_12h(value)
 
         else:
             result[key] = value
@@ -3483,6 +3560,8 @@ def get_parent_dashboard(parent_id):
         # CHILDREN + BUS + DRIVER (NAME & PHONE) + ROUTE + STOP
         # ----------------------------------------------------
 
+        today_ist = get_ist_date_str()
+
         cursor.execute(
             """
             SELECT
@@ -3525,17 +3604,17 @@ def get_parent_dashboard(parent_id):
                 ON pc.pickup_stop_id = ps.stop_id
 
             LEFT JOIN student_boarding sb
-                ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
+                ON pc.child_id = sb.child_id AND (sb.attendance_date = %s OR sb.attendance_date = CURDATE())
 
             LEFT JOIN child_bus_absence cba
-                ON pc.child_id = cba.child_id AND cba.absence_date = CURDATE() AND cba.status != 'CANCELLED'
+                ON pc.child_id = cba.child_id AND (cba.absence_date = %s OR cba.absence_date = CURDATE()) AND cba.status != 'CANCELLED'
 
             WHERE pc.parent_id = %s
 
             GROUP BY pc.child_id
             ORDER BY pc.child_id ASC
             """,
-            (parent_id,)
+            (today_ist, today_ist, parent_id)
         )
         children = cursor.fetchall() or []
 
@@ -3648,6 +3727,8 @@ def get_parent_children(parent_id):
         conn = get_db()
         cursor = conn.cursor(dictionary=True)
 
+        today_ist = get_ist_date_str()
+
         cursor.execute(
             """
             SELECT
@@ -3692,13 +3773,13 @@ def get_parent_children(parent_id):
                 ON pc.pickup_stop_id = ps.stop_id
 
             LEFT JOIN student_boarding sb
-                ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
+                ON pc.child_id = sb.child_id AND (sb.attendance_date = %s OR sb.attendance_date = CURDATE())
 
             WHERE pc.parent_id = %s
             GROUP BY pc.child_id
             ORDER BY pc.child_id ASC
             """,
-            (parent_id,)
+            (today_ist, parent_id)
         )
         children = cursor.fetchall() or []
 
@@ -3890,15 +3971,17 @@ def get_parent_child_location(parent_id, child_id):
         # ----------------------------------------------------
         # TODAY'S STUDENT BOARDING STATUS
         # ----------------------------------------------------
+        today_ist = get_ist_date_str()
         boarding_info = None
         cursor.execute(
             """
             SELECT boarding_status, boarding_time
             FROM student_boarding
-            WHERE child_id = %s AND attendance_date = CURDATE()
+            WHERE child_id = %s AND (attendance_date = %s OR attendance_date = CURDATE())
+            ORDER BY attendance_id DESC
             LIMIT 1
             """,
-            (child_id,)
+            (child_id, today_ist)
         )
         b_row = cursor.fetchone()
         if b_row:
@@ -5387,6 +5470,8 @@ def get_driver_assigned_students(driver_id):
         if not bus:
             return jsonify({"success": True, "students": [], "boarding": []}), 200
 
+        today_ist = get_ist_date_str()
+
         cursor.execute(
             """
             SELECT 
@@ -5408,8 +5493,8 @@ def get_driver_assigned_students(driver_id):
             LEFT JOIN users u ON pc.parent_id = u.user_id
             LEFT JOIN pickup_stops ps ON pc.pickup_stop_id = ps.stop_id
             LEFT JOIN routes r ON pc.route_id = r.route_id
-            LEFT JOIN student_boarding sb ON pc.child_id = sb.child_id AND sb.attendance_date = CURDATE()
-            LEFT JOIN child_bus_absence cba ON pc.child_id = cba.child_id AND cba.absence_date = CURDATE() AND cba.status != 'CANCELLED'
+            LEFT JOIN student_boarding sb ON pc.child_id = sb.child_id AND (sb.attendance_date = %s OR sb.attendance_date = CURDATE())
+            LEFT JOIN child_bus_absence cba ON pc.child_id = cba.child_id AND (cba.absence_date = %s OR cba.absence_date = CURDATE()) AND cba.status != 'CANCELLED'
             WHERE pc.bus_id = %s OR (pc.bus_id IS NULL AND LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s)))
             GROUP BY 
                 pc.child_id,
@@ -5425,7 +5510,7 @@ def get_driver_assigned_students(driver_id):
                 ps.longitude
             ORDER BY pc.child_name ASC
             """,
-            (bus["bus_id"], bus.get("route"))
+            (today_ist, today_ist, bus["bus_id"], bus.get("route"))
         )
         students = cursor.fetchall()
         serialized_students = [serialize_row(s) for s in students]
@@ -5486,7 +5571,10 @@ def update_student_boarding(driver_id):
         trip = cursor.fetchone()
         trip_id = trip["trip_id"] if trip else None
 
-        cursor.execute("SELECT attendance_id FROM student_boarding WHERE child_id = %s AND attendance_date = CURDATE()", (child_id,))
+        ist_time = get_ist_time_str()
+        ist_date = get_ist_date_str()
+
+        cursor.execute("SELECT attendance_id FROM student_boarding WHERE child_id = %s AND (attendance_date = %s OR attendance_date = CURDATE()) ORDER BY attendance_id DESC LIMIT 1", (child_id, ist_date))
         existing = cursor.fetchone()
 
         if existing:
@@ -5495,13 +5583,14 @@ def update_student_boarding(driver_id):
                     """
                     UPDATE student_boarding
                     SET boarding_status = %s,
-                        boarding_time = CURTIME(),
+                        boarding_time = %s,
                         driver_id = %s,
                         bus_id = %s,
-                        trip_id = %s
+                        trip_id = %s,
+                        attendance_date = %s
                     WHERE attendance_id = %s
                     """,
-                    (boarding_status, driver_id, bus["bus_id"], trip_id, existing["attendance_id"])
+                    (boarding_status, ist_time, driver_id, bus["bus_id"], trip_id, ist_date, existing["attendance_id"])
                 )
             else:
                 cursor.execute(
@@ -5522,22 +5611,22 @@ def update_student_boarding(driver_id):
                     """
                     INSERT INTO student_boarding
                     (child_id, bus_id, driver_id, trip_id, attendance_date, boarding_status, boarding_time, stop_id)
-                    VALUES (%s, %s, %s, %s, CURDATE(), %s, CURTIME(), %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (child_id, bus["bus_id"], driver_id, trip_id, boarding_status, child["pickup_stop_id"])
+                    (child_id, bus["bus_id"], driver_id, trip_id, ist_date, boarding_status, ist_time, child["pickup_stop_id"])
                 )
             else:
                 cursor.execute(
                     """
                     INSERT INTO student_boarding
                     (child_id, bus_id, driver_id, trip_id, attendance_date, boarding_status, boarding_time, stop_id)
-                    VALUES (%s, %s, %s, %s, CURDATE(), %s, NULL, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, NULL, %s)
                     """,
-                    (child_id, bus["bus_id"], driver_id, trip_id, boarding_status, child["pickup_stop_id"])
+                    (child_id, bus["bus_id"], driver_id, trip_id, ist_date, boarding_status, child["pickup_stop_id"])
                 )
         conn.commit()
 
-        cursor.execute("SELECT boarding_status, boarding_time FROM student_boarding WHERE child_id = %s AND attendance_date = CURDATE()", (child_id,))
+        cursor.execute("SELECT boarding_status, boarding_time FROM student_boarding WHERE child_id = %s AND (attendance_date = %s OR attendance_date = CURDATE()) ORDER BY attendance_id DESC LIMIT 1", (child_id, ist_date))
         rec = cursor.fetchone()
         serialized_rec = serialize_row(rec) if rec else {}
 
