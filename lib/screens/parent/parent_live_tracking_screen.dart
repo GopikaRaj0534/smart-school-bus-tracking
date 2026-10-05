@@ -47,7 +47,10 @@ class _ParentLiveTrackingScreenState extends State<ParentLiveTrackingScreen> {
 
   void _startPolling() {
     _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    final interval = (_isDemoMode || ApiService.activeDemoDriverLocations.isNotEmpty)
+        ? const Duration(seconds: 2)
+        : const Duration(seconds: 4);
+    _pollingTimer = Timer.periodic(interval, (_) {
       if (mounted) {
         _fetchLiveLocation(silent: true);
       }
@@ -86,7 +89,11 @@ class _ParentLiveTrackingScreenState extends State<ParentLiveTrackingScreen> {
             if (locRes['success'] == true) {
               final loc = locRes['location'] is Map ? Map<String, dynamic>.from(locRes['location']) : null;
               final stops = locRes['stops'] is List ? List<Map<String, dynamic>>.from(locRes['stops']) : <Map<String, dynamic>>[];
-              final isDemo = (locRes['is_demo'] == true) || (loc != null && loc['is_demo'] == true);
+              final isDemo = (locRes['is_demo'] == true) ||
+                  (loc != null && loc['is_demo'] == true) ||
+                  ApiService.activeDemoDriverLocations.isNotEmpty;
+
+              final bool prevDemoState = _isDemoMode;
               setState(() {
                 _isTripActive = locRes['is_trip_active'] == true || isDemo;
                 _isDemoMode = isDemo;
@@ -96,6 +103,10 @@ class _ParentLiveTrackingScreenState extends State<ParentLiveTrackingScreen> {
                 _lastUpdatedTime = loc?['updated_at']?.toString();
                 _isLoading = false;
               });
+
+              if (prevDemoState != _isDemoMode) {
+                _startPolling();
+              }
               return;
             }
           }

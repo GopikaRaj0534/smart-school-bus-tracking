@@ -45,6 +45,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
 
   // Live GPS Tracking State
   bool _isLiveTripActive = false;
+  bool _isDemoMode = false;
   double? _liveBusLat;
   double? _liveBusLng;
   List<Map<String, dynamic>> _liveStops = [];
@@ -84,7 +85,10 @@ class _ParentDashboardState extends State<ParentDashboard> {
 
   void _startPolling() {
     _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+    final interval = (_isDemoMode || ApiService.activeDemoDriverLocations.isNotEmpty)
+        ? const Duration(seconds: 2)
+        : const Duration(seconds: 8);
+    _pollingTimer = Timer.periodic(interval, (_) {
       if (mounted && !isLoading) {
         _loadDashboardData(silent: true);
       }
@@ -231,11 +235,14 @@ class _ParentDashboardState extends State<ParentDashboard> {
             childId: activeChildId!,
           );
           if (mounted && locRes['success'] == true) {
-            final isTripActive = locRes['is_trip_active'] == true;
             final loc = locRes['location'] is Map ? Map<String, dynamic>.from(locRes['location']) : null;
             final stopsData = locRes['stops'] is List
                 ? (locRes['stops'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList()
                 : <Map<String, dynamic>>[];
+            final isDemo = (locRes['is_demo'] == true) ||
+                (loc != null && loc['is_demo'] == true) ||
+                ApiService.activeDemoDriverLocations.isNotEmpty;
+            final isTripActive = locRes['is_trip_active'] == true || isDemo;
 
             double? parseDouble(dynamic val) {
               if (val == null) return null;
@@ -243,13 +250,19 @@ class _ParentDashboardState extends State<ParentDashboard> {
               return double.tryParse(val.toString());
             }
 
+            final bool prevDemoState = _isDemoMode;
             setState(() {
               _isLiveTripActive = isTripActive;
+              _isDemoMode = isDemo;
               _liveBusLat = parseDouble(loc?['latitude']);
               _liveBusLng = parseDouble(loc?['longitude']);
               _liveStops = stopsData.isNotEmpty ? stopsData : _allStops;
               _lastLocationTime = loc?['updated_at']?.toString();
             });
+
+            if (prevDemoState != _isDemoMode) {
+              _startPolling();
+            }
           }
         } catch (e, stackTrace) {
           debugPrint('ParentDashboard live location fetch error: $e\n$stackTrace');
@@ -915,7 +928,8 @@ class _ParentDashboardState extends State<ParentDashboard> {
                         busNumber: busNumber,
                         routeLabel: routeName,
                         etaLabel: eta,
-                        isTripActive: _isLiveTripActive,
+                        isTripActive: _isLiveTripActive || _isDemoMode,
+                        isDemoMode: _isDemoMode,
                         busLat: _liveBusLat,
                         busLng: _liveBusLng,
                         routeStops: _liveStops,
