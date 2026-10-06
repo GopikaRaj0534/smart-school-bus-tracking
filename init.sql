@@ -273,4 +273,24 @@ CREATE TABLE IF NOT EXISTS `school_settings` (
 INSERT IGNORE INTO `school_settings` (`id`, `school_name`, `address`, `latitude`, `longitude`, `updated_at`) VALUES
 (1, 'Saintgits College of Applied Sciences', 'Kottukulam Hills, Pathamuttom P.O., Kottayam, Kerala - 686532', 9.50921, 76.55183, CURRENT_TIMESTAMP);
 
+-- 15. parent_notifications
+CREATE TABLE IF NOT EXISTS `parent_notifications` (
+  `notification_id` int(11) NOT NULL AUTO_INCREMENT,
+  `parent_id` int(11) NOT NULL,
+  `driver_id` int(11) DEFAULT NULL,
+  `bus_id` int(11) DEFAULT NULL,
+  `route_id` int(11) DEFAULT NULL,
+  `trip_id` int(11) DEFAULT NULL,
+  `title` varchar(150) NOT NULL,
+  `message` varchar(255) NOT NULL,
+  `notification_type` varchar(50) DEFAULT 'trip',
+  `is_read` tinyint(1) DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`notification_id`),
+  KEY `parent_id` (`parent_id`),
+  KEY `driver_id` (`driver_id`),
+  KEY `bus_id` (`bus_id`),
+  KEY `created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

@@ -50,22 +50,13 @@ class _ParentDashboardState extends State<ParentDashboard> {
   List<Map<String, dynamic>> _liveStops = [];
   String? _lastLocationTime;
   Map<String, dynamic>? _schoolInfo;
+  List<Map<String, dynamic>> _fetchedNotifications = [];
 
   final List<Map<String, String>> notifications = const [
     {
-      "title": "Trip Started",
-      "subtitle": "Bus left school depot safely",
-      "time": "3:05 PM"
-    },
-    {
-      "title": "Approaching Pickup Point",
-      "subtitle": "Bus is 5 minutes away from your stop",
-      "time": "3:18 PM"
-    },
-    {
-      "title": "Boarding Confirmed",
-      "subtitle": "Child boarded school bus",
-      "time": "3:24 PM"
+      "title": "Welcome to RouteSafe",
+      "subtitle": "System alerts and child trip status updates will appear here.",
+      "time": "Just now"
     },
   ];
 
@@ -253,6 +244,20 @@ class _ParentDashboardState extends State<ParentDashboard> {
           }
         } catch (e, stackTrace) {
           debugPrint('ParentDashboard live location fetch error: $e\n$stackTrace');
+        }
+      }
+
+      // Fetch Notifications for Parent
+      if (widget.parentId != null) {
+        try {
+          final notifRes = await ApiService.getParentNotifications(widget.parentId!);
+          if (mounted && notifRes['success'] == true && notifRes['notifications'] is List) {
+            setState(() {
+              _fetchedNotifications = List<Map<String, dynamic>>.from(notifRes['notifications']);
+            });
+          }
+        } catch (e) {
+          debugPrint('ParentDashboard notifications fetch error: $e');
         }
       }
     } catch (e, stackTrace) {
@@ -1226,7 +1231,10 @@ class _ParentDashboardState extends State<ParentDashboard> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    ...notifications.map(
+                    ...(_fetchedNotifications.isNotEmpty
+                            ? _fetchedNotifications
+                            : notifications.map((n) => Map<String, dynamic>.from(n)).toList())
+                        .map(
                       (n) => Card(
                         margin: const EdgeInsets.only(bottom: 8),
                         elevation: 1,
@@ -1244,12 +1252,15 @@ class _ParentDashboardState extends State<ParentDashboard> {
                             ),
                           ),
                           title: Text(
-                            n["title"]!,
+                            n["title"]?.toString() ?? "Notification",
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                           ),
-                          subtitle: Text(n["subtitle"]!, style: const TextStyle(fontSize: 12)),
+                          subtitle: Text(
+                            n["subtitle"]?.toString() ?? n["message"]?.toString() ?? "",
+                            style: const TextStyle(fontSize: 12),
+                          ),
                           trailing: Text(
-                            n["time"]!,
+                            n["time"]?.toString() ?? n["timestamp"]?.toString() ?? "",
                             style: const TextStyle(
                               fontSize: 11,
                               color: AppColors.textMuted,

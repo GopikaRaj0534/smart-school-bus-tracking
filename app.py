@@ -96,7 +96,7 @@ class SQLiteDictCursor:
         self.rowcount = 0
 
     def execute(self, query, params=None):
-        sqlite_query = query.replace('%s', '?').replace('NOW()', "datetime('now')").replace('now()', "datetime('now')")
+        sqlite_query = query.replace('%s', '?').replace('NOW()', "datetime('now')").replace('now()', "datetime('now')").replace('AUTO_INCREMENT', 'AUTOINCREMENT')
         if params is None:
             self.cursor.execute(sqlite_query)
         else:
@@ -4352,6 +4352,77 @@ def start_driver_trip(driver_id):
         )
 
         trip_id = cursor.lastrowid
+
+        # ----------------------------------------------------
+        # CREATE PARENT NOTIFICATIONS FOR ASSIGNED BUS/ROUTE
+        # ----------------------------------------------------
+        try:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS parent_notifications (
+                    notification_id INT AUTO_INCREMENT PRIMARY KEY,
+                    parent_id INT NOT NULL,
+                    driver_id INT DEFAULT NULL,
+                    bus_id INT DEFAULT NULL,
+                    route_id INT DEFAULT NULL,
+                    trip_id INT DEFAULT NULL,
+                    title VARCHAR(150) NOT NULL,
+                    message VARCHAR(255) NOT NULL,
+                    notification_type VARCHAR(50) DEFAULT 'trip',
+                    is_read TINYINT(1) DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            bus_num = bus.get("bus_number") or str(bus.get("bus_id"))
+            route_name = bus.get("route") or "assigned route"
+
+            cursor.execute(
+                """
+                SELECT DISTINCT pc.parent_id
+                FROM parent_children pc
+                LEFT JOIN routes r ON pc.route_id = r.route_id
+                WHERE pc.bus_id = %s OR (pc.bus_id IS NULL AND LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s)))
+                """,
+                (bus["bus_id"], route_name)
+            )
+            parents_to_notify = cursor.fetchall() or []
+
+            notif_title = "Bus Started"
+            notif_message = f"Bus {bus_num} has started its trip on the {route_name} route."
+
+            for p in parents_to_notify:
+                p_id = p.get("parent_id")
+                if p_id:
+                    cursor.execute(
+                        """
+                        INSERT INTO parent_notifications
+                        (
+                            parent_id,
+                            driver_id,
+                            bus_id,
+                            trip_id,
+                            title,
+                            message,
+                            notification_type,
+                            is_read,
+                            created_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, 'trip', 0, NOW())
+                        """,
+                        (
+                            p_id,
+                            driver_id,
+                            bus["bus_id"],
+                            trip_id,
+                            notif_title,
+                            notif_message
+                        )
+                    )
+        except Exception as notif_err:
+            print("[NOTICE] Error creating parent notifications on trip start:", notif_err)
+
         conn.commit()
 
         return jsonify({
@@ -7216,7 +7287,54 @@ def get_parent_notifications(parent_id):
         cursor = conn.cursor(dictionary=True)
         notifications = []
 
-        # 1. Fetch boarding status logs for parent's children
+        # 1. Fetch persistent parent notifications from parent_notifications table
+        try:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS parent_notifications (
+                    notification_id INT AUTO_INCREMENT PRIMARY KEY,
+                    parent_id INT NOT NULL,
+                    driver_id INT DEFAULT NULL,
+                    bus_id INT DEFAULT NULL,
+                    route_id INT DEFAULT NULL,
+                    trip_id INT DEFAULT NULL,
+                    title VARCHAR(150) NOT NULL,
+                    message VARCHAR(255) NOT NULL,
+                    notification_type VARCHAR(50) DEFAULT 'trip',
+                    is_read TINYINT(1) DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            cursor.execute(
+                """
+                SELECT notification_id, parent_id, driver_id, bus_id, title, message, notification_type, is_read, created_at
+                FROM parent_notifications
+                WHERE parent_id = %s
+                ORDER BY created_at DESC, notification_id DESC
+                LIMIT 20
+                """,
+                (parent_id,)
+            )
+            pn_rows = cursor.fetchall() or []
+            for row in pn_rows:
+                serialized = serialize_row(row)
+                created_val = serialized.get("created_at") or ""
+                notifications.append({
+                    "id": str(row["notification_id"]),
+                    "title": row["title"],
+                    "message": row["message"],
+                    "subtitle": row["message"],
+                    "type": row.get("notification_type") or "trip",
+                    "is_read": bool(row.get("is_read")),
+                    "time": str(created_val),
+                    "timestamp": str(created_val)
+                })
+        except Exception as e:
+            print("Error fetching parent_notifications table:", e)
+
+        # 2. Fetch boarding status logs for parent's children
         try:
             cursor.execute(
                 """
@@ -7241,13 +7359,15 @@ def get_parent_notifications(parent_id):
                     "id": f"board_{b.get('child_id')}_{b.get('attendance_date')}",
                     "title": title,
                     "message": msg,
+                    "subtitle": msg,
                     "type": "boarding",
+                    "time": str(b.get("attendance_date") or ""),
                     "timestamp": str(b.get("attendance_date") or "")
                 })
         except Exception as e:
             print("Error fetching boarding notifications:", e)
 
-        # 2. Fetch absence logs for parent's children
+        # 3. Fetch absence logs for parent's children
         try:
             cursor.execute(
                 """
@@ -7265,11 +7385,14 @@ def get_parent_notifications(parent_id):
                 c_name = a.get("child_name", "Child")
                 a_date = a.get("absence_date", "")
                 status = a.get("status", "SUBMITTED")
+                msg = f"Absence for {c_name} on {a_date} is {status}."
                 notifications.append({
                     "id": f"abs_{a.get('child_id')}_{a.get('created_at')}",
                     "title": f"Absence Notification: {c_name}",
-                    "message": f"Absence for {c_name} on {a_date} is {status}.",
+                    "message": msg,
+                    "subtitle": msg,
                     "type": "absence",
+                    "time": str(a.get("created_at") or ""),
                     "timestamp": str(a.get("created_at") or "")
                 })
         except Exception as e:
@@ -7280,8 +7403,10 @@ def get_parent_notifications(parent_id):
                 "id": "welcome_1",
                 "title": "Welcome to RouteSafe",
                 "message": "System alerts and child trip status updates will appear here.",
+                "subtitle": "System alerts and child trip status updates will appear here.",
                 "type": "system",
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "time": get_ist_now().strftime("%Y-%m-%d %I:%M %p"),
+                "timestamp": get_ist_now().strftime("%Y-%m-%d %I:%M %p")
             })
 
         return jsonify({
