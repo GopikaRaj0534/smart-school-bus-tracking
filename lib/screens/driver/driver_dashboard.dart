@@ -52,12 +52,6 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
   DateTime? _lastGpsTime;
   double? _currentLat;
   double? _currentLng;
-  bool _isDemoMode = false;
-
-  // Demo Location Simulation State
-  Timer? _demoTimer;
-  int _demoRouteIndex = 0;
-  List<Map<String, dynamic>> _demoRoutePoints = [];
 
   @override
   void initState() {
@@ -77,7 +71,6 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
   void dispose() {
     _tabController.dispose();
     _stopGpsTracking();
-    _stopDemoSimulation();
     super.dispose();
   }
 
@@ -91,6 +84,16 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
     setState(() {
       isLoading = true;
       errorMessage = null;
+      tripActive = false;
+      _currentLat = null;
+      _currentLng = null;
+      assignedBus = null;
+      driver = null;
+      assignedChildren = [];
+      routeStops = [];
+      tripHistory = [];
+      boardingRecords = [];
+      emergencyHistory = [];
     });
 
     try {
@@ -598,25 +601,22 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
   Future<void> _sendLocationToBackend(double lat, double lng) async {
     try {
       final busId = assignedBus != null ? (assignedBus!['bus_id'] ?? assignedBus!['id']) : null;
-      final double sendLat = lat;
-      final double sendLng = lng;
 
-      debugPrint('Sending GPS location update to Flask backend: Lat=$sendLat, Lng=$sendLng, DriverID=${widget.driverId}, BusID=$busId, isDemo=$_isDemoMode');
+      debugPrint('Sending GPS location update to Flask backend: Lat=$lat, Lng=$lng, DriverID=${widget.driverId}, BusID=$busId');
 
       final res = await ApiService.updateDriverLocation(
         driverId: widget.driverId,
-        latitude: sendLat,
-        longitude: sendLng,
-        isDemo: _isDemoMode,
+        latitude: lat,
+        longitude: lng,
       );
 
       debugPrint('Location update API response: $res');
 
-      if (res['success'] == true || _isDemoMode) {
+      if (res['success'] == true) {
         if (mounted) {
           setState(() {
-            _currentLat = sendLat;
-            _currentLng = sendLng;
+            _currentLat = lat;
+            _currentLng = lng;
             _lastGpsTime = DateTime.now();
           });
         }
@@ -624,113 +624,6 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
     } catch (e) {
       debugPrint('Failed to send location update to backend: $e');
     }
-  }
-
-  // ============================================================
-  // DEMO LOCATION SIMULATION (ALAPPUZHA ROUTE MOVEMENT)
-  // ============================================================
-
-  List<Map<String, dynamic>> _getAlappuzhaDemoRoutePoints() {
-    final waypoints = [
-      {'name': 'Alappuzha Railway Station', 'lat': 9.490000, 'lng': 76.326000, 'is_stop': true},
-      {'name': 'Muhammed Ismail Sahib Road', 'lat': 9.493000, 'lng': 76.331000, 'is_stop': false},
-      {'name': 'Mullakkal Junction', 'lat': 9.495500, 'lng': 76.335000, 'is_stop': false},
-      {'name': 'Alappuzha KSRTC', 'lat': 9.498100, 'lng': 76.338800, 'is_stop': true},
-      {'name': 'North Police Station', 'lat': 9.501500, 'lng': 76.334000, 'is_stop': false},
-      {'name': 'Kommady', 'lat': 9.505000, 'lng': 76.330000, 'is_stop': true},
-      {'name': 'Civil Station Junction', 'lat': 9.500000, 'lng': 76.325000, 'is_stop': false},
-      {'name': 'Alappuzha Beach Junction', 'lat': 9.494000, 'lng': 76.322000, 'is_stop': false},
-    ];
-
-    List<Map<String, dynamic>> points = [];
-    const int stepsPerSegment = 6;
-
-    for (int i = 0; i < waypoints.length; i++) {
-      final start = waypoints[i];
-      final end = waypoints[(i + 1) % waypoints.length];
-
-      final double startLat = (start['lat'] as num).toDouble();
-      final double startLng = (start['lng'] as num).toDouble();
-      final double endLat = (end['lat'] as num).toDouble();
-      final double endLng = (end['lng'] as num).toDouble();
-
-      for (int step = 0; step < stepsPerSegment; step++) {
-        final double t = step / stepsPerSegment;
-        final double lat = startLat + (endLat - startLat) * t;
-        final double lng = startLng + (endLng - startLng) * t;
-
-        final String currentStopName = start['name'].toString();
-        final String nextStopName = end['name'].toString();
-
-        points.add({
-          'latitude': lat,
-          'longitude': lng,
-          'stop_name': currentStopName,
-          'next_stop': nextStopName,
-          'is_stop': step == 0 && (start['is_stop'] == true),
-        });
-      }
-    }
-    return points;
-  }
-
-  void _startDemoSimulation() {
-    _stopDemoSimulation();
-
-    if (_demoRoutePoints.isEmpty) {
-      _demoRoutePoints = _getAlappuzhaDemoRoutePoints();
-    }
-
-    _isDemoMode = true;
-
-    if (_demoRouteIndex >= _demoRoutePoints.length) {
-      _demoRouteIndex = 0;
-    }
-
-    final firstPt = _demoRoutePoints[_demoRouteIndex];
-    final double initLat = (firstPt['latitude'] as num).toDouble();
-    final double initLng = (firstPt['longitude'] as num).toDouble();
-
-    if (mounted) {
-      setState(() {
-        _currentLat = initLat;
-        _currentLng = initLng;
-        _lastGpsTime = DateTime.now();
-      });
-    }
-
-    _sendLocationToBackend(initLat, initLng);
-
-    // Continuous smooth simulation timer every 2 seconds
-    _demoTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
-      if (!_isDemoMode || !mounted) {
-        timer.cancel();
-        return;
-      }
-
-      _demoRouteIndex = (_demoRouteIndex + 1) % _demoRoutePoints.length;
-      final currentPt = _demoRoutePoints[_demoRouteIndex];
-
-      final double nextLat = (currentPt['latitude'] as num).toDouble();
-      final double nextLng = (currentPt['longitude'] as num).toDouble();
-
-      if (mounted) {
-        setState(() {
-          _currentLat = nextLat;
-          _currentLng = nextLng;
-          _lastGpsTime = DateTime.now();
-        });
-      }
-
-      _sendLocationToBackend(nextLat, nextLng);
-    });
-  }
-
-  void _stopDemoSimulation() {
-    _demoTimer?.cancel();
-    _demoTimer = null;
-    _isDemoMode = false;
-    ApiService.activeDemoDriverLocations.remove(widget.driverId);
   }
 
   void _startGpsTracking() {
@@ -1208,16 +1101,11 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
             ),
             const SizedBox(height: 16),
 
-            // Demo Location Simulation Toggle Card
-            _buildDemoToggleCard(),
-            const SizedBox(height: 16),
-
             // Map Preview Card
             TrackingMapCard(
               busNumber: busNumber,
               routeLabel: routeName,
-              isTripActive: tripActive || _isDemoMode,
-              isDemoMode: _isDemoMode,
+              isTripActive: tripActive,
               busLat: _currentLat,
               busLng: _currentLng,
               routeStops: routeStops,
@@ -1226,20 +1114,7 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
                   ? "${_lastGpsTime!.hour}:${_lastGpsTime!.minute.toString().padLeft(2, '0')}:${_lastGpsTime!.second.toString().padLeft(2, '0')}"
                   : null,
             ),
-            if (_isDemoMode) ...[
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.science_rounded, size: 14, color: Colors.amber.shade900),
-                  const SizedBox(width: 6),
-                  Text(
-                    'DEMO MODE Active (Alappuzha: 9.498100, 76.338800)',
-                    style: TextStyle(fontSize: 12, color: Colors.amber.shade900, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-            ] else if (_lastGpsTime != null && _currentLat != null && _currentLng != null) ...[
+            if (_lastGpsTime != null && _currentLat != null && _currentLng != null) ...[
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1816,127 +1691,6 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
 
 
 
-  Widget _buildDemoToggleCard() {
-    final currentPt = (_demoRoutePoints.isNotEmpty && _demoRouteIndex < _demoRoutePoints.length)
-        ? _demoRoutePoints[_demoRouteIndex]
-        : null;
-
-    final stopName = currentPt?['stop_name']?.toString() ?? 'Alappuzha Route';
-    final nextStop = currentPt?['next_stop']?.toString() ?? 'Alappuzha KSRTC';
-
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      color: _isDemoMode ? Colors.amber.shade50 : null,
-      elevation: _isDemoMode ? 3 : 1,
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.science_rounded,
-                      color: _isDemoMode ? Colors.amber.shade900 : AppColors.textSecondary,
-                    ),
-                    const SizedBox(width: 10),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Demo Location Simulation',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          _isDemoMode ? 'Alappuzha Route • Moving Live' : 'Alappuzha Route Simulation',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: _isDemoMode ? Colors.amber.shade900 : AppColors.textSecondary,
-                            fontWeight: _isDemoMode ? FontWeight.w600 : FontWeight.normal,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                Switch(
-                  value: _isDemoMode,
-                  activeThumbColor: Colors.amber.shade800,
-                  onChanged: (val) {
-                    if (val) {
-                      _startDemoSimulation();
-                    } else {
-                      _stopDemoSimulation();
-                      _updateCurrentGpsLocation();
-                    }
-                  },
-                ),
-              ],
-            ),
-            if (_isDemoMode) ...[
-              const Divider(),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.amber.shade100,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.amber.shade700, width: 1),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.directions_bus_rounded, color: Colors.amber.shade900, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'DEMO MODE ACTIVE — Moving along Alappuzha Route',
-                            style: TextStyle(fontSize: 12, color: Colors.amber.shade900, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.amber.shade900,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Text(
-                            'LIVE ➔',
-                            style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Stop: $stopName',
-                      style: TextStyle(fontSize: 12, color: Colors.amber.shade900, fontWeight: FontWeight.w600),
-                    ),
-                    Text(
-                      'Next Stop: $nextStop',
-                      style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
-                    ),
-                    if (_currentLat != null && _currentLng != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        'Simulated Location: ${_currentLat!.toStringAsFixed(6)}, ${_currentLng!.toStringAsFixed(6)}',
-                        style: const TextStyle(fontSize: 11, color: AppColors.textMuted, fontFamily: 'monospace'),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
   // ============================================================
   // TAB 5: LIVE LOCATION
   // ============================================================
@@ -1986,16 +1740,11 @@ class _DriverDashboardState extends State<DriverDashboard> with SingleTickerProv
               ),
             ),
           ),
-          const SizedBox(height: 12),
-
-          // Demo Location Simulation Toggle Card
-          _buildDemoToggleCard(),
           const SizedBox(height: 16),
           TrackingMapCard(
             busNumber: busNumber,
             routeLabel: routeName,
-            isTripActive: tripActive || _isDemoMode,
-            isDemoMode: _isDemoMode,
+            isTripActive: tripActive,
             busLat: _currentLat,
             busLng: _currentLng,
             routeStops: routeStops,

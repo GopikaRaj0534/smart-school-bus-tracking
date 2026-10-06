@@ -18,9 +18,6 @@ class ApiService {
   static String? _cachedBaseUrl;
   static String? _manualBaseUrl;
 
-  /// Global state cache for active demo driver locations (Alappuzha simulation)
-  static final Map<int, Map<String, dynamic>> activeDemoDriverLocations = {};
-
   /// Configure production API URL dynamically (e.g. `ApiService.overrideBaseUrl = 'https://smart-school-bus-tracking.onrender.com'`)
   static set overrideBaseUrl(String? url) {
     _manualBaseUrl = url;
@@ -510,24 +507,12 @@ class ApiService {
     required int driverId,
     required double latitude,
     required double longitude,
-    bool isDemo = false,
   }) async {
-    if (isDemo) {
-      activeDemoDriverLocations[driverId] = {
-        'latitude': latitude,
-        'longitude': longitude,
-        'is_demo': true,
-        'updated_at': DateTime.now().toIso8601String(),
-      };
-    } else {
-      activeDemoDriverLocations.remove(driverId);
-    }
     return _post(
       '/driver/$driverId/location',
       {
         'latitude': latitude,
         'longitude': longitude,
-        'is_demo': isDemo,
       },
     );
   }
@@ -535,15 +520,6 @@ class ApiService {
   static Future<Map<String, dynamic>> getDriverLocation(
     int driverId,
   ) async {
-    if (activeDemoDriverLocations.containsKey(driverId)) {
-      final demoData = activeDemoDriverLocations[driverId]!;
-      return {
-        'success': true,
-        'location': demoData,
-        'is_demo': true,
-        'is_trip_active': true,
-      };
-    }
     return _get('/driver/$driverId/location');
   }
 
@@ -563,18 +539,7 @@ class ApiService {
     required int parentId,
     required int childId,
   }) async {
-    final res = await _get('/parent/$parentId/child/$childId/location');
-    if (res['success'] == true && activeDemoDriverLocations.isNotEmpty) {
-      if (res['is_demo'] == true) return res;
-      final demoLoc = activeDemoDriverLocations.values.first;
-      return {
-        ...res,
-        'is_trip_active': true,
-        'is_demo': true,
-        'location': demoLoc,
-      };
-    }
-    return res;
+    return _get('/parent/$parentId/child/$childId/location');
   }
 
   static Future<Map<String, dynamic>> getAdminEmergencies() async {

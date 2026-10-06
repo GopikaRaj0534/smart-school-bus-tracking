@@ -16,7 +16,6 @@ class TrackingMapCard extends StatefulWidget {
   final Map<String, dynamic>? assignedStop;
   final Map<String, dynamic>? schoolLocation;
   final String? lastUpdatedTime;
-  final bool isDemoMode;
 
   const TrackingMapCard({
     super.key,
@@ -30,7 +29,6 @@ class TrackingMapCard extends StatefulWidget {
     this.assignedStop,
     this.schoolLocation,
     this.lastUpdatedTime,
-    this.isDemoMode = false,
   });
 
   @override
@@ -394,34 +392,24 @@ class _TrackingMapCardState extends State<TrackingMapCard> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: widget.isDemoMode
-                        ? Colors.amber.shade100
-                        : (hasValidGps
-                            ? AppColors.successLight
-                            : Colors.grey.withOpacityCompat(0.15)),
+                    color: hasValidGps
+                        ? AppColors.successLight
+                        : Colors.grey.withOpacityCompat(0.15),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        widget.isDemoMode
-                            ? Icons.science_rounded
-                            : (hasValidGps ? Icons.sensors_rounded : Icons.location_off_rounded),
+                        hasValidGps ? Icons.sensors_rounded : Icons.location_off_rounded,
                         size: 13,
-                        color: widget.isDemoMode
-                            ? Colors.amber.shade900
-                            : (hasValidGps ? AppColors.success : Colors.grey.shade600),
+                        color: hasValidGps ? AppColors.success : Colors.grey.shade600,
                       ),
                       const SizedBox(width: 5),
                       Text(
-                        widget.isDemoMode
-                            ? "DEMO MODE (SIMULATED)"
-                            : (hasValidGps ? "LIVE GPS" : "LOCATION UNAVAILABLE"),
+                        hasValidGps ? "LIVE GPS" : "LOCATION UNAVAILABLE",
                         style: TextStyle(
-                          color: widget.isDemoMode
-                              ? Colors.amber.shade900
-                              : (hasValidGps ? AppColors.success : Colors.grey.shade700),
+                          color: hasValidGps ? AppColors.success : Colors.grey.shade700,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                         ),
@@ -540,40 +528,6 @@ class _TrackingMapCardState extends State<TrackingMapCard> {
                       ],
                     ),
                   ),
-                  if (widget.isDemoMode)
-                    Positioned(
-                      left: 10,
-                      top: 10,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.shade800,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Colors.black26,
-                              blurRadius: 4,
-                              offset: Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.science_rounded, color: Colors.white, size: 14),
-                            SizedBox(width: 5),
-                            Text(
-                              "DEMO MODE - Alappuzha",
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
 
                   // Map Attribution Badge
                   Positioned(
