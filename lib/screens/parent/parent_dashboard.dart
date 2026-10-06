@@ -1235,39 +1235,60 @@ class _ParentDashboardState extends State<ParentDashboard> {
                             ? _fetchedNotifications
                             : notifications.map((n) => Map<String, dynamic>.from(n)).toList())
                         .map(
-                      (n) => Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        elevation: 1,
-                        child: ListTile(
-                          leading: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: AppColors.primaryLight,
-                              borderRadius: BorderRadius.circular(10),
+                      (n) {
+                        final type = n["type"]?.toString() ?? "system";
+                        IconData iconData = Icons.notifications_active_rounded;
+                        Color iconColor = AppColors.primary;
+                        Color bgIconColor = AppColors.primaryLight;
+
+                        if (type == 'boarding') {
+                          iconData = Icons.check_circle_rounded;
+                          iconColor = AppColors.success;
+                          bgIconColor = AppColors.successLight;
+                        } else if (type == 'trip') {
+                          iconData = Icons.directions_bus_rounded;
+                          iconColor = AppColors.primary;
+                          bgIconColor = AppColors.primaryLight;
+                        } else if (type == 'absence') {
+                          iconData = Icons.event_busy_rounded;
+                          iconColor = AppColors.warning;
+                          bgIconColor = AppColors.yellowLight;
+                        }
+
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          elevation: 1,
+                          child: ListTile(
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: bgIconColor,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(
+                                iconData,
+                                color: iconColor,
+                                size: 20,
+                              ),
                             ),
-                            child: const Icon(
-                              Icons.notifications_active_rounded,
-                              color: AppColors.primary,
-                              size: 20,
+                            title: Text(
+                              n["title"]?.toString() ?? "Notification",
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                            ),
+                            subtitle: Text(
+                              n["subtitle"]?.toString() ?? n["message"]?.toString() ?? "",
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            trailing: Text(
+                              n["time"]?.toString() ?? n["timestamp"]?.toString() ?? "",
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.textMuted,
+                              ),
                             ),
                           ),
-                          title: Text(
-                            n["title"]?.toString() ?? "Notification",
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                          ),
-                          subtitle: Text(
-                            n["subtitle"]?.toString() ?? n["message"]?.toString() ?? "",
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          trailing: Text(
-                            n["time"]?.toString() ?? n["timestamp"]?.toString() ?? "",
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: AppColors.textMuted,
-                            ),
-                          ),
-                        ),
-                      ),
+                        );
+                      },
                     ),
                   ],
                 ),

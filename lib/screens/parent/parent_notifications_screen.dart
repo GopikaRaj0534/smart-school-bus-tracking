@@ -109,8 +109,8 @@ class _ParentNotificationsScreenState extends State<ParentNotificationsScreen> {
                       itemBuilder: (context, index) {
                         final item = _notifications[index];
                         final title = item['title']?.toString() ?? 'Notification';
-                        final subtitle = item['subtitle']?.toString() ?? '';
-                        final time = item['time']?.toString() ?? '';
+                        final subtitle = item['subtitle']?.toString() ?? item['message']?.toString() ?? '';
+                        final time = item['time']?.toString() ?? item['timestamp']?.toString() ?? '';
                         final type = item['type']?.toString() ?? 'system';
 
                         IconData iconData = Icons.notifications_rounded;
@@ -123,7 +123,11 @@ class _ParentNotificationsScreenState extends State<ParentNotificationsScreen> {
                           bgIconColor = AppColors.successLight;
                         } else if (type == 'trip') {
                           iconData = Icons.directions_bus_rounded;
-                          iconColor = AppColors.accentYellow;
+                          iconColor = AppColors.primary;
+                          bgIconColor = AppColors.primaryLight;
+                        } else if (type == 'absence') {
+                          iconData = Icons.event_busy_rounded;
+                          iconColor = AppColors.warning;
                           bgIconColor = AppColors.yellowLight;
                         }
 

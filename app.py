@@ -96,7 +96,7 @@ class SQLiteDictCursor:
         self.rowcount = 0
 
     def execute(self, query, params=None):
-        sqlite_query = query.replace('%s', '?').replace('NOW()', "datetime('now')").replace('now()', "datetime('now')").replace('AUTO_INCREMENT', 'AUTOINCREMENT')
+        sqlite_query = query.replace('%s', '?').replace('NOW()', "datetime('now')").replace('now()', "datetime('now')")
         if params is None:
             self.cursor.execute(sqlite_query)
         else:
@@ -4352,77 +4352,6 @@ def start_driver_trip(driver_id):
         )
 
         trip_id = cursor.lastrowid
-
-        # ----------------------------------------------------
-        # CREATE PARENT NOTIFICATIONS FOR ASSIGNED BUS/ROUTE
-        # ----------------------------------------------------
-        try:
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS parent_notifications (
-                    notification_id INT AUTO_INCREMENT PRIMARY KEY,
-                    parent_id INT NOT NULL,
-                    driver_id INT DEFAULT NULL,
-                    bus_id INT DEFAULT NULL,
-                    route_id INT DEFAULT NULL,
-                    trip_id INT DEFAULT NULL,
-                    title VARCHAR(150) NOT NULL,
-                    message VARCHAR(255) NOT NULL,
-                    notification_type VARCHAR(50) DEFAULT 'trip',
-                    is_read TINYINT(1) DEFAULT 0,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-
-            bus_num = bus.get("bus_number") or str(bus.get("bus_id"))
-            route_name = bus.get("route") or "assigned route"
-
-            cursor.execute(
-                """
-                SELECT DISTINCT pc.parent_id
-                FROM parent_children pc
-                LEFT JOIN routes r ON pc.route_id = r.route_id
-                WHERE pc.bus_id = %s OR (pc.bus_id IS NULL AND LOWER(TRIM(r.route_name)) = LOWER(TRIM(%s)))
-                """,
-                (bus["bus_id"], route_name)
-            )
-            parents_to_notify = cursor.fetchall() or []
-
-            notif_title = "Bus Started"
-            notif_message = f"Bus {bus_num} has started its trip on the {route_name} route."
-
-            for p in parents_to_notify:
-                p_id = p.get("parent_id")
-                if p_id:
-                    cursor.execute(
-                        """
-                        INSERT INTO parent_notifications
-                        (
-                            parent_id,
-                            driver_id,
-                            bus_id,
-                            trip_id,
-                            title,
-                            message,
-                            notification_type,
-                            is_read,
-                            created_at
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, 'trip', 0, NOW())
-                        """,
-                        (
-                            p_id,
-                            driver_id,
-                            bus["bus_id"],
-                            trip_id,
-                            notif_title,
-                            notif_message
-                        )
-                    )
-        except Exception as notif_err:
-            print("[NOTICE] Error creating parent notifications on trip start:", notif_err)
-
         conn.commit()
 
         return jsonify({
@@ -7287,64 +7216,92 @@ def get_parent_notifications(parent_id):
         cursor = conn.cursor(dictionary=True)
         notifications = []
 
-        # 1. Fetch persistent parent notifications from parent_notifications table
+        # 1. Fetch Trip Started notifications for parent's children/buses
         try:
             cursor.execute(
                 """
-                CREATE TABLE IF NOT EXISTS parent_notifications (
-                    notification_id INT AUTO_INCREMENT PRIMARY KEY,
-                    parent_id INT NOT NULL,
-                    driver_id INT DEFAULT NULL,
-                    bus_id INT DEFAULT NULL,
-                    route_id INT DEFAULT NULL,
-                    trip_id INT DEFAULT NULL,
-                    title VARCHAR(150) NOT NULL,
-                    message VARCHAR(255) NOT NULL,
-                    notification_type VARCHAR(50) DEFAULT 'trip',
-                    is_read TINYINT(1) DEFAULT 0,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-
-            cursor.execute(
-                """
-                SELECT notification_id, parent_id, driver_id, bus_id, title, message, notification_type, is_read, created_at
-                FROM parent_notifications
-                WHERE parent_id = %s
-                ORDER BY created_at DESC, notification_id DESC
-                LIMIT 20
+                SELECT 
+                    dt.trip_id,
+                    dt.driver_id,
+                    dt.bus_id,
+                    dt.start_time,
+                    dt.status AS trip_status,
+                    COALESCE(b.bus_number, 'Assigned') AS bus_number,
+                    COALESCE(r.route_name, b.route, 'School Route') AS route_name
+                FROM driver_trips dt
+                INNER JOIN buses b 
+                    ON dt.bus_id = b.bus_id
+                INNER JOIN parent_children pc 
+                    ON (
+                        pc.bus_id = b.bus_id 
+                        OR (pc.bus_id IS NULL AND pc.route_id = (
+                            SELECT r2.route_id FROM routes r2 
+                            WHERE LOWER(TRIM(r2.route_name)) = LOWER(TRIM(b.route)) 
+                            LIMIT 1
+                        ))
+                    )
+                LEFT JOIN routes r 
+                    ON (
+                        pc.route_id = r.route_id 
+                        OR LOWER(TRIM(r.route_name)) = LOWER(TRIM(b.route))
+                    )
+                WHERE pc.parent_id = %s
+                GROUP BY dt.trip_id, dt.driver_id, dt.bus_id, dt.start_time, dt.status, b.bus_number, b.route, r.route_name
+                ORDER BY dt.start_time DESC, dt.trip_id DESC
+                LIMIT 15
                 """,
                 (parent_id,)
             )
-            pn_rows = cursor.fetchall() or []
-            for row in pn_rows:
-                serialized = serialize_row(row)
-                created_val = serialized.get("created_at") or ""
+            trip_logs = cursor.fetchall() or []
+            for t in trip_logs:
+                bus_num = t.get("bus_number") or "Assigned"
+                r_name = t.get("route_name") or "School Route"
+                start_time_val = t.get("start_time")
+
+                time_str = ""
+                sort_key = str(start_time_val or "")
+                if start_time_val:
+                    if isinstance(start_time_val, datetime):
+                        dt_ist = start_time_val.replace(tzinfo=IST_TZ) if start_time_val.tzinfo is None else start_time_val.astimezone(IST_TZ)
+                        time_str = dt_ist.strftime("%d %b, %I:%M %p")
+                        sort_key = dt_ist.isoformat()
+                    elif isinstance(start_time_val, timedelta):
+                        tot_sec = int(start_time_val.total_seconds())
+                        hrs = (tot_sec // 3600) % 24
+                        mins = (tot_sec % 3600) // 60
+                        ampm = "AM" if hrs < 12 else "PM"
+                        hrs_12 = hrs % 12
+                        if hrs_12 == 0: hrs_12 = 12
+                        time_str = f"{hrs_12:02d}:{mins:02d} {ampm}"
+                    else:
+                        time_str = str(start_time_val)
+
+                msg = f"Bus {bus_num} has started its trip on the {r_name} route."
                 notifications.append({
-                    "id": str(row["notification_id"]),
-                    "title": row["title"],
-                    "message": row["message"],
-                    "subtitle": row["message"],
-                    "type": row.get("notification_type") or "trip",
-                    "is_read": bool(row.get("is_read")),
-                    "time": str(created_val),
-                    "timestamp": str(created_val)
+                    "id": f"trip_{t.get('trip_id')}",
+                    "title": "Trip Started",
+                    "message": msg,
+                    "subtitle": msg,
+                    "type": "trip",
+                    "timestamp": time_str,
+                    "time": time_str,
+                    "trip_id": t.get("trip_id"),
+                    "sort_key": sort_key
                 })
         except Exception as e:
-            print("Error fetching parent_notifications table:", e)
+            print("Error fetching trip notifications:", e)
 
         # 2. Fetch boarding status logs for parent's children
         try:
             cursor.execute(
                 """
-                SELECT sb.child_id, pc.child_name, sb.boarding_status, sb.attendance_date, b.bus_number
+                SELECT sb.child_id, pc.child_name, sb.boarding_status, sb.attendance_date, sb.boarding_time, b.bus_number
                 FROM student_boarding sb
                 JOIN parent_children pc ON sb.child_id = pc.child_id
                 LEFT JOIN buses b ON sb.bus_id = b.bus_id
                 WHERE pc.parent_id = %s
-                ORDER BY sb.attendance_date DESC
-                LIMIT 10
+                ORDER BY sb.attendance_date DESC, sb.attendance_id DESC
+                LIMIT 15
                 """,
                 (parent_id,)
             )
@@ -7353,16 +7310,19 @@ def get_parent_notifications(parent_id):
                 status = b.get("boarding_status", "Not Boarded")
                 c_name = b.get("child_name", "Child")
                 bus_num = b.get("bus_number") or "N/A"
+                b_time = format_time_to_12h(b.get("boarding_time")) or str(b.get("attendance_date") or "")
                 title = f"Boarding Update: {c_name}"
                 msg = f"{c_name} status updated to {status} on Bus {bus_num}."
+                sort_key = f"{b.get('attendance_date')} {b.get('boarding_time') or ''}"
                 notifications.append({
-                    "id": f"board_{b.get('child_id')}_{b.get('attendance_date')}",
+                    "id": f"board_{b.get('child_id')}_{b.get('attendance_date')}_{b.get('boarding_status')}",
                     "title": title,
                     "message": msg,
                     "subtitle": msg,
                     "type": "boarding",
-                    "time": str(b.get("attendance_date") or ""),
-                    "timestamp": str(b.get("attendance_date") or "")
+                    "timestamp": b_time,
+                    "time": b_time,
+                    "sort_key": sort_key
                 })
         except Exception as e:
             print("Error fetching boarding notifications:", e)
@@ -7376,7 +7336,7 @@ def get_parent_notifications(parent_id):
                 JOIN parent_children pc ON cba.child_id = pc.child_id
                 WHERE pc.parent_id = %s
                 ORDER BY cba.created_at DESC
-                LIMIT 10
+                LIMIT 15
                 """,
                 (parent_id,)
             )
@@ -7385,6 +7345,11 @@ def get_parent_notifications(parent_id):
                 c_name = a.get("child_name", "Child")
                 a_date = a.get("absence_date", "")
                 status = a.get("status", "SUBMITTED")
+                created_val = a.get("created_at")
+                time_str = str(created_val or a_date)
+                if isinstance(created_val, datetime):
+                    dt_ist = created_val.replace(tzinfo=IST_TZ) if created_val.tzinfo is None else created_val.astimezone(IST_TZ)
+                    time_str = dt_ist.strftime("%d %b, %I:%M %p")
                 msg = f"Absence for {c_name} on {a_date} is {status}."
                 notifications.append({
                     "id": f"abs_{a.get('child_id')}_{a.get('created_at')}",
@@ -7392,11 +7357,15 @@ def get_parent_notifications(parent_id):
                     "message": msg,
                     "subtitle": msg,
                     "type": "absence",
-                    "time": str(a.get("created_at") or ""),
-                    "timestamp": str(a.get("created_at") or "")
+                    "timestamp": time_str,
+                    "time": time_str,
+                    "sort_key": str(created_val or "")
                 })
         except Exception as e:
             print("Error fetching absence notifications:", e)
+
+        # Sort all notifications by sort_key descending
+        notifications.sort(key=lambda x: x.get("sort_key", ""), reverse=True)
 
         if not notifications:
             notifications.append({
@@ -7405,8 +7374,8 @@ def get_parent_notifications(parent_id):
                 "message": "System alerts and child trip status updates will appear here.",
                 "subtitle": "System alerts and child trip status updates will appear here.",
                 "type": "system",
-                "time": get_ist_now().strftime("%Y-%m-%d %I:%M %p"),
-                "timestamp": get_ist_now().strftime("%Y-%m-%d %I:%M %p")
+                "timestamp": get_ist_datetime_str(),
+                "time": get_ist_datetime_str()
             })
 
         return jsonify({
