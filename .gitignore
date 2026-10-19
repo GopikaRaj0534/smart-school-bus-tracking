@@ -49,3 +49,7 @@ app.*.map.json
 .env.*
 *.env
 
+# Local database backups
+routesafe_db_backup.sql
+*.sql.bak
+

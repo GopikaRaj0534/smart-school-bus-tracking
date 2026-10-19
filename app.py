@@ -28,11 +28,10 @@ CORS(app)
 
 
 # ============================================================
-# DATABASE CONFIGURATION & RESILIENT FALLBACK WRAPPER
+# DATABASE CONFIGURATION (MySQL - XAMPP)
 # ============================================================
 
 from zoneinfo import ZoneInfo
-import sqlite3
 
 # ============================================================
 # TIMEZONE & DATETIME HELPERS (Asia/Kolkata - IST UTC+05:30)
@@ -87,71 +86,6 @@ def format_time_to_12h(val):
         pass
     return val_str
 
-class SQLiteDictCursor:
-    def __init__(self, conn):
-        self.conn = conn
-        self.cursor = conn.cursor()
-        self.description = None
-        self.lastrowid = None
-        self.rowcount = 0
-
-    def execute(self, query, params=None):
-        sqlite_query = query.replace('%s', '?').replace('NOW()', "datetime('now')").replace('now()', "datetime('now')")
-        if params is None:
-            self.cursor.execute(sqlite_query)
-        else:
-            if isinstance(params, dict):
-                self.cursor.execute(sqlite_query, params)
-            else:
-                self.cursor.execute(sqlite_query, tuple(params))
-        self.description = self.cursor.description
-        self.lastrowid = self.cursor.lastrowid
-        self.rowcount = self.cursor.rowcount
-        return self
-
-    def fetchone(self):
-        row = self.cursor.fetchone()
-        if row is None:
-            return None
-        columns = [desc[0] for desc in self.description]
-        return dict(zip(columns, row))
-
-    def fetchall(self):
-        rows = self.cursor.fetchall()
-        if not rows:
-            return []
-        columns = [desc[0] for desc in self.description]
-        return [dict(zip(columns, row)) for row in rows]
-
-    def close(self):
-        self.cursor.close()
-
-class SQLiteConnectionWrapper:
-    def __init__(self, db_path='routesafe.db'):
-        self.db_path = db_path
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.create_function("CURDATE", 0, get_ist_date_str)
-        self.conn.create_function("curdate", 0, get_ist_date_str)
-        self.conn.create_function("CURTIME", 0, get_ist_time_str)
-        self.conn.create_function("curtime", 0, get_ist_time_str)
-        self.conn.create_function("NOW", 0, get_ist_datetime_str)
-        self.conn.create_function("now", 0, get_ist_datetime_str)
-
-    def cursor(self, dictionary=True, buffered=True):
-        return SQLiteDictCursor(self.conn)
-
-    def commit(self):
-        self.conn.commit()
-
-    def rollback(self):
-        self.conn.rollback()
-
-    def close(self):
-        self.conn.close()
-
-    def is_connected(self):
-        return True
-
 
 def get_db_config():
     raw_host = os.environ.get("DB_HOST", "localhost").strip()
@@ -167,6 +101,7 @@ def get_db_config():
 
 def get_db():
     config = get_db_config()
+    last_err = None
     # 1. Try configured MySQL host
     try:
         conn = mysql.connector.connect(**config)
@@ -178,32 +113,27 @@ def get_db():
             pass
         return conn
     except Exception as e:
+        last_err = e
         print(f"[DATABASE NOTICE] Primary DB connection to {config.get('host')}:{config.get('port')} failed: {e}")
 
-    # 2. Try local MySQL (localhost / 127.0.0.1)
-    if config.get("host") not in ("localhost", "127.0.0.1"):
+    # 2. Try alternate local host (127.0.0.1 / localhost)
+    alternate_host = "127.0.0.1" if config.get("host") == "localhost" else "localhost"
+    try:
+        alt_config = dict(config)
+        alt_config["host"] = alternate_host
+        conn = mysql.connector.connect(**alt_config)
         try:
-            local_config = {
-                "host": "127.0.0.1",
-                "port": 3306,
-                "user": os.environ.get("MYSQL_USER", os.environ.get("DB_USER", "root")),
-                "password": os.environ.get("MYSQL_PASSWORD", os.environ.get("DB_PASSWORD", "")),
-                "database": os.environ.get("MYSQL_DATABASE", os.environ.get("DB_NAME", "routesafe_db"))
-            }
-            conn = mysql.connector.connect(**local_config)
-            try:
-                cur = conn.cursor()
-                cur.execute("SET time_zone = '+05:30'")
-                cur.close()
-            except Exception:
-                pass
-            return conn
-        except Exception as local_err:
-            print(f"[DATABASE NOTICE] Local MySQL connection failed: {local_err}")
+            cur = conn.cursor()
+            cur.execute("SET time_zone = '+05:30'")
+            cur.close()
+        except Exception:
+            pass
+        return conn
+    except Exception as alt_err:
+        last_err = alt_err
+        print(f"[DATABASE NOTICE] Alternate MySQL connection to {alternate_host} failed: {alt_err}")
 
-    # 3. Fallback to resilient RouteSafe production SQLite fallback database
-    print("[DATABASE NOTICE] Utilizing resilient RouteSafe production SQLite fallback database.")
-    return SQLiteConnectionWrapper('routesafe.db')
+    raise RuntimeError(f"Unable to connect to MySQL database 'routesafe_db'. Ensure XAMPP MySQL is running: {last_err}")
 
 
 # ============================================================
