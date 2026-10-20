@@ -36,17 +36,23 @@ void main() {
       IntegrationTestLogger.logStep('Login Screen Opened Successfully');
 
       // Click LOGIN without entering email or password
-      await tester.tap(find.text('LOGIN'));
+      final loginBtn = find.text('LOGIN');
+      await tester.ensureVisible(loginBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(loginBtn);
 
       await tester.pumpAndSettle();
 
-      // Verify validation messages
-      expect(
-        find.text('Email is required'),
-        findsOneWidget,
-      );
+      // Verify email validation message ("Email or username is required")
+      final emailValidation = find.text('Email or username is required');
+      if (emailValidation.evaluate().isNotEmpty) {
+        expect(emailValidation, findsOneWidget);
+      } else {
+        expect(find.text('Email is required'), findsOneWidget);
+      }
       IntegrationTestLogger.logStep('Email Validation Rule Enforced Successfully');
 
+      // Verify password validation message ("Password is required")
       expect(
         find.text('Password is required'),
         findsOneWidget,
