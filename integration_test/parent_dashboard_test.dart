@@ -75,6 +75,7 @@ void main() {
           // Select Parent Role if choice chip is present
           final parentChip = find.text('Parent');
           if (parentChip.evaluate().isNotEmpty) {
+            await tester.ensureVisible(parentChip.first);
             await tester.tap(parentChip.first);
             await tester.pumpAndSettle();
           }
@@ -89,12 +90,28 @@ void main() {
             'anju123',
           );
 
-          // Tap LOGIN
-          await tester.tap(find.text('LOGIN'));
-          await tester.pump(const Duration(seconds: 4));
-          await tester.pump(const Duration(seconds: 2));
+          // Ensure LOGIN button is visible and tap
+          final loginBtn = find.text('LOGIN');
+          await tester.ensureVisible(loginBtn);
+          await tester.pumpAndSettle();
+          await tester.tap(loginBtn);
 
-          // Login attempt completed
+          // Wait for asynchronous login API request and navigation to complete
+          await IntegrationTestLogger.waitForCondition(
+            tester,
+            () => find.byType(LoginScreen).evaluate().isEmpty,
+            timeout: const Duration(seconds: 25),
+          );
+
+          // Check for any visible error snackbar if navigation didn't complete
+          if (find.byType(LoginScreen).evaluate().isNotEmpty) {
+            final snackMsg = IntegrationTestLogger.getSnackBarMessage(tester);
+            if (snackMsg != null) {
+              throw Exception('Login failed with server message: $snackMsg');
+            }
+          }
+
+          // Login attempt completed and navigated to Parent Dashboard
           expect(find.byType(LoginScreen), findsNothing);
           IntegrationTestLogger.logStep('Parent Login & Navigation Tested Successfully');
         } catch (e, st) {
@@ -123,6 +140,7 @@ void main() {
           final callDriverBtn = find.textContaining('Call Driver');
           expect(callDriverBtn, findsWidgets);
 
+          await tester.ensureVisible(callDriverBtn.first);
           await tester.tap(callDriverBtn.first);
           await tester.pump();
           await tester.pump(const Duration(seconds: 2));

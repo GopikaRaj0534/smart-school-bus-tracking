@@ -50,13 +50,28 @@ void main() {
       );
 
       // Tap LOGIN
-      await tester.tap(find.text('LOGIN'));
-      await tester.pumpAndSettle(
-        const Duration(seconds: 5),
+      final loginBtn = find.text('LOGIN');
+      await tester.ensureVisible(loginBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(loginBtn);
+
+      // Wait for asynchronous login API response and navigation to complete
+      await IntegrationTestLogger.waitForCondition(
+        tester,
+        () => find.byType(LoginScreen).evaluate().isEmpty,
+        timeout: const Duration(seconds: 25),
       );
 
+      // Check for visible error snackbar if navigation didn't complete
+      if (find.byType(LoginScreen).evaluate().isNotEmpty) {
+        final snackMsg = IntegrationTestLogger.getSnackBarMessage(tester);
+        if (snackMsg != null) {
+          throw Exception('Parent login failed with server message: $snackMsg');
+        }
+      }
+
       // Login should proceed without crashing
-      expect(find.text('LOGIN'), findsNothing);
+      expect(find.byType(LoginScreen), findsNothing);
       IntegrationTestLogger.logStep('Valid Parent Credentials Authenticated Successfully');
     } catch (e, st) {
       IntegrationTestLogger.logFailure(testTitle, e, st);
@@ -95,10 +110,14 @@ void main() {
       );
 
       // Tap LOGIN
-      await tester.tap(find.text('LOGIN'));
-      await tester.pumpAndSettle(
-        const Duration(seconds: 5),
-      );
+      final loginBtn = find.text('LOGIN');
+      await tester.ensureVisible(loginBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(loginBtn);
+
+      // Wait for invalid login response (remains on LoginScreen or shows SnackBar)
+      await Future<void>.delayed(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
 
       // Login screen should remain
       expect(find.text('Welcome back'), findsOneWidget);

@@ -81,6 +81,7 @@ void main() {
           // Select Admin Role Chip
           final adminChip = find.text('Admin');
           if (adminChip.evaluate().isNotEmpty) {
+            await tester.ensureVisible(adminChip.first);
             await tester.tap(adminChip.first);
             await tester.pumpAndSettle();
           }
@@ -96,10 +97,27 @@ void main() {
           );
 
           // Tap LOGIN
-          await tester.tap(find.text('LOGIN'));
-          await tester.pumpAndSettle(const Duration(seconds: 5));
+          final loginBtn = find.text('LOGIN');
+          await tester.ensureVisible(loginBtn);
+          await tester.pumpAndSettle();
+          await tester.tap(loginBtn);
 
-          // Login attempt completed without crashing
+          // Wait for asynchronous login network response and navigation to complete
+          await IntegrationTestLogger.waitForCondition(
+            tester,
+            () => find.byType(LoginScreen).evaluate().isEmpty,
+            timeout: const Duration(seconds: 25),
+          );
+
+          // Check for any visible error snackbar if navigation didn't complete
+          if (find.byType(LoginScreen).evaluate().isNotEmpty) {
+            final snackMsg = IntegrationTestLogger.getSnackBarMessage(tester);
+            if (snackMsg != null) {
+              throw Exception('Admin login failed with server message: $snackMsg');
+            }
+          }
+
+          // Login attempt completed and navigated away from LoginScreen
           expect(find.byType(LoginScreen), findsNothing);
           IntegrationTestLogger.logStep('Navigation Tested Successfully');
         } catch (e, st) {

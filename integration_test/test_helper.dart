@@ -2,7 +2,8 @@
 
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
 
 /// ANSI Color formatting constants for integration test output
 class TestColor {
@@ -93,4 +94,48 @@ class IntegrationTestLogger {
 
   /// Checks if a test has encountered a failure.
   static bool hasFailed(String testName) => _failedTests.contains(testName);
+
+  /// Waits for an async condition to become true while yielding real wall-clock time
+  /// to the Dart event loop so background HTTP network requests can complete.
+  static Future<void> waitForCondition(
+    WidgetTester tester,
+    bool Function() condition, {
+    Duration timeout = const Duration(seconds: 25),
+    Duration pollInterval = const Duration(milliseconds: 300),
+  }) async {
+    final stopwatch = Stopwatch()..start();
+    while (!condition() && stopwatch.elapsed < timeout) {
+      await Future<void>.delayed(pollInterval);
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+  }
+
+  /// Safely extracts the visible SnackBar text if any is present on screen.
+  static String? getSnackBarMessage(WidgetTester tester) {
+    try {
+      final snackBarFinder = find.byType(SnackBar);
+      if (snackBarFinder.evaluate().isNotEmpty) {
+        final textWidgets = find.descendant(
+          of: snackBarFinder,
+          matching: find.byType(Text),
+        );
+        if (textWidgets.evaluate().isNotEmpty) {
+          final texts = <String>[];
+          for (final elem in textWidgets.evaluate()) {
+            final widget = elem.widget;
+            if (widget is Text &&
+                widget.data != null &&
+                widget.data!.trim().isNotEmpty) {
+              texts.add(widget.data!.trim());
+            }
+          }
+          if (texts.isNotEmpty) {
+            return texts.join(' - ');
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
 }

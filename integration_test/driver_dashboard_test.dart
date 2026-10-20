@@ -109,6 +109,7 @@ void main() {
           final startTripBtn = find.textContaining('START TRIP');
           if (startTripBtn.evaluate().isNotEmpty) {
             expect(startTripBtn, findsOneWidget);
+            await tester.ensureVisible(startTripBtn.first);
             await tester.tap(startTripBtn.first);
             await tester.pump();
             await tester.pump(const Duration(seconds: 2));
@@ -179,6 +180,7 @@ void main() {
 
           final startTripBtn = find.textContaining('START TRIP');
           if (startTripBtn.evaluate().isNotEmpty) {
+            await tester.ensureVisible(startTripBtn.first);
             await tester.tap(startTripBtn.first);
             await tester.pump();
             for (int i = 0; i < 10; i++) {
@@ -217,6 +219,7 @@ void main() {
           // Select Driver Role Chip
           final driverChip = find.text('Driver');
           if (driverChip.evaluate().isNotEmpty) {
+            await tester.ensureVisible(driverChip.first);
             await tester.tap(driverChip.first);
             await tester.pumpAndSettle();
           }
@@ -232,8 +235,25 @@ void main() {
           );
 
           // Tap LOGIN
-          await tester.tap(find.text('LOGIN'));
-          await tester.pumpAndSettle(const Duration(seconds: 5));
+          final loginBtn = find.text('LOGIN');
+          await tester.ensureVisible(loginBtn);
+          await tester.pumpAndSettle();
+          await tester.tap(loginBtn);
+
+          // Wait for asynchronous login API response and navigation to complete
+          await IntegrationTestLogger.waitForCondition(
+            tester,
+            () => find.byType(LoginScreen).evaluate().isEmpty,
+            timeout: const Duration(seconds: 25),
+          );
+
+          // Check for visible error snackbar if navigation didn't complete
+          if (find.byType(LoginScreen).evaluate().isNotEmpty) {
+            final snackMsg = IntegrationTestLogger.getSnackBarMessage(tester);
+            if (snackMsg != null) {
+              throw Exception('Driver login failed with server message: $snackMsg');
+            }
+          }
 
           // Login attempt completed and navigated away from LoginScreen
           expect(find.byType(LoginScreen), findsNothing);
